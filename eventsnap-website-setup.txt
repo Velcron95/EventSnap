@@ -1,0 +1,209 @@
+# EventSnap Website Setup Guide
+
+## Project Overview
+This document contains instructions for setting up a simple Next.js website for EventSnap that includes:
+- Privacy Policy and Terms of Service pages
+- Account deletion request functionality
+- Mobile-friendly responsive design
+- Easy deployment to Vercel
+
+## Setup Instructions
+
+1. Create a new Next.js project:
+```
+npx create-next-app eventsnap-website
+cd eventsnap-website
+```
+
+2. Install additional dependencies:
+```
+npm install react-hook-form react-icons
+```
+
+3. Create the following folder structure:
+```
+/pages
+  index.js (Home page)
+  privacy.js (Privacy Policy)
+  terms.js (Terms of Service)
+  delete-account.js (Account deletion request)
+/components
+  Layout.js (Common layout with header/footer)
+  Header.js
+  Footer.js
+  DeleteAccountForm.js
+/styles
+  globals.css
+  Home.module.css
+/public
+  logo.png (Add your EventSnap logo here)
+```
+
+4. Content for key files:
+
+### pages/index.js
+```jsx
+import Head from 'next/head'
+import Link from 'next/link'
+import Layout from '../components/Layout'
+import styles from '../styles/Home.module.css'
+
+export default function Home() {
+  return (
+    <Layout>
+      <Head>
+        <title>EventSnap - Share Event Photos Easily</title>
+        <meta name="description" content="EventSnap helps you share and collect photos at events" />
+      </Head>
+
+      <main className={styles.main}>
+        <h1 className={styles.title}>Welcome to EventSnap</h1>
+        
+        <p className={styles.description}>
+          The easiest way to share photos at events
+        </p>
+
+        <div className={styles.grid}>
+          <Link href="/privacy" className={styles.card}>
+            <h2>Privacy Policy &rarr;</h2>
+            <p>Learn how we protect your data and privacy.</p>
+          </Link>
+
+          <Link href="/terms" className={styles.card}>
+            <h2>Terms of Service &rarr;</h2>
+            <p>Review our terms and conditions.</p>
+          </Link>
+
+          <Link href="/delete-account" className={styles.card}>
+            <h2>Delete Account &rarr;</h2>
+            <p>Request to delete your account and data.</p>
+          </Link>
+        </div>
+      </main>
+    </Layout>
+  )
+}
+```
+
+### components/DeleteAccountForm.js
+```jsx
+import { useForm } from 'react-hook-form';
+import styles from '../styles/DeleteAccount.module.css';
+
+export default function DeleteAccountForm() {
+  const { register, handleSubmit, formState: { errors } } = useForm();
+  
+  const onSubmit = async (data) => {
+    // In a real implementation, this would send the request to your backend
+    alert(`Account deletion request received for ${data.email}. We'll process your request within 30 days.`);
+    
+    // You can implement actual form submission to your backend here
+    // const response = await fetch('/api/delete-account', {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify(data),
+    // });
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className={styles.form}>
+      <div className={styles.formGroup}>
+        <label htmlFor="email">Email Address</label>
+        <input
+          id="email"
+          type="email"
+          placeholder="Your account email"
+          {...register('email', { 
+            required: 'Email is required',
+            pattern: {
+              value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+              message: 'Invalid email address'
+            }
+          })}
+        />
+        {errors.email && <span className={styles.error}>{errors.email.message}</span>}
+      </div>
+
+      <div className={styles.formGroup}>
+        <label htmlFor="reason">Reason for deletion (optional)</label>
+        <textarea
+          id="reason"
+          placeholder="Please tell us why you're deleting your account"
+          {...register('reason')}
+        />
+      </div>
+
+      <div className={styles.formGroup}>
+        <label className={styles.checkbox}>
+          <input
+            type="checkbox"
+            {...register('confirm', { required: 'You must confirm this action' })}
+          />
+          I understand that this action is permanent and cannot be undone
+        </label>
+        {errors.confirm && <span className={styles.error}>{errors.confirm.message}</span>}
+      </div>
+
+      <button type="submit" className={styles.button}>Request Account Deletion</button>
+    </form>
+  );
+}
+```
+
+### pages/delete-account.js
+```jsx
+import Head from 'next/head'
+import Layout from '../components/Layout'
+import DeleteAccountForm from '../components/DeleteAccountForm'
+import styles from '../styles/DeleteAccount.module.css'
+
+export default function DeleteAccount() {
+  return (
+    <Layout>
+      <Head>
+        <title>Delete Account - EventSnap</title>
+        <meta name="description" content="Request to delete your EventSnap account" />
+      </Head>
+
+      <div className={styles.container}>
+        <h1>Delete Your Account</h1>
+        
+        <p>We're sorry to see you go. Please fill out this form to request deletion of your account and associated data.</p>
+        
+        <p>Please note:</p>
+        <ul>
+          <li>Account deletion is permanent and cannot be undone</li>
+          <li>All your personal data will be removed from our systems</li>
+          <li>Photos you've shared in events will be deleted</li>
+          <li>Processing may take up to 30 days</li>
+        </ul>
+        
+        <DeleteAccountForm />
+      </div>
+    </Layout>
+  )
+}
+```
+
+5. For the Privacy Policy and Terms of Service pages, use the content from the privacy_policy.md and terms_of_service.md files we created earlier.
+
+6. Deploy to Vercel:
+- Push your code to GitHub
+- Go to vercel.com and sign up/login
+- Import your GitHub repository
+- Deploy
+
+## Additional Notes
+
+- You'll need to implement the actual account deletion functionality on your backend
+- Update all contact information and company details in the legal documents
+- Consider adding Google Analytics or another analytics tool to track website usage
+- Make sure to test the website on mobile devices before deploying
+
+## Customization
+
+You can customize the website by:
+- Updating the color scheme in the CSS files
+- Adding your app screenshots to the home page
+- Including download links for the app stores
+- Adding a contact form for support requests 

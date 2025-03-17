@@ -1,6 +1,6 @@
 console.log('App.tsx loaded - TEST LOG');
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -16,7 +16,7 @@ import { CreateEventScreen } from './src/screens/CreateEventScreen';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { EventProvider } from './src/context/EventContext';
 import { TabParamList, RootStackParamList, EventTabParamList } from './types';
-import { View, Image, Text, TouchableOpacity } from 'react-native';
+import { View, Image, Text, TouchableOpacity, BackHandler } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { ParticipantsScreen } from './src/screens/ParticipantsScreen';
 import { ProfileSettingsScreen } from './src/screens/ProfileSettingsScreen';
@@ -29,6 +29,31 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const EventTabNavigator = ({ route, navigation }: any) => {
   const { eventName, eventId } = route.params;
   console.log('EventTabNavigator params:', { eventName, eventId });
+  
+  // Add a back handler to navigate to Events screen when back button is pressed
+  React.useEffect(() => {
+    // This handles the navigation back gesture and UI back button
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      // If we're navigating back, redirect to Events screen
+      if (e.data.action.type === 'GO_BACK') {
+        e.preventDefault();
+        navigation.navigate('Events');
+      }
+    });
+
+    // Add hardware back button handler for Android
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      console.log('Hardware back button pressed in EventTabNavigator');
+      // Navigate to Events screen
+      navigation.navigate('Events');
+      return true; // Prevent default behavior
+    });
+
+    return () => {
+      unsubscribe();
+      backHandler.remove();
+    };
+  }, [navigation]);
   
   return (
     <View style={{ flex: 1 }}>
@@ -44,18 +69,10 @@ const EventTabNavigator = ({ route, navigation }: any) => {
             paddingVertical: 5,
           },
         }}
+        // Disable swipe between tabs to prevent accidental navigation
+        backBehavior="none"
+        detachInactiveScreens={false} // Keep all screens mounted to maintain back handler
       >
-        <EventTab.Screen
-          name="Camera"
-          component={CameraScreen}
-          initialParams={{ eventId }}
-          options={{
-            tabBarLabel: "Camera",
-            tabBarIcon: ({ color, size }) => (
-              <MaterialIcons name="camera-alt" size={size} color={color} />
-            ),
-          }}
-        />
         <EventTab.Screen
           name="Gallery"
           component={GalleryScreen}
@@ -64,6 +81,17 @@ const EventTabNavigator = ({ route, navigation }: any) => {
             tabBarLabel: "Gallery",
             tabBarIcon: ({ color, size }) => (
               <MaterialIcons name="photo-library" size={size} color={color} />
+            ),
+          }}
+        />
+        <EventTab.Screen
+          name="Camera"
+          component={CameraScreen}
+          initialParams={{ eventId }}
+          options={{
+            tabBarLabel: "Camera",
+            tabBarIcon: ({ color, size }) => (
+              <MaterialIcons name="camera-alt" size={size} color={color} />
             ),
           }}
         />
@@ -86,8 +114,21 @@ const EventTabNavigator = ({ route, navigation }: any) => {
 const NavigationContent = () => {
   const { session, loading } = useAuth();
   const [permissionsGranted, setPermissionsGranted] = useState(false);
+  const [forceRender, setForceRender] = useState(false);
 
-  if (loading) {
+  // Add a timeout to force render if loading takes too long
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (loading) {
+        console.log('Loading timeout reached, forcing re-render');
+        setForceRender(true);
+      }
+    }, 8000); // 8 second timeout
+
+    return () => clearTimeout(timeoutId);
+  }, [loading]);
+
+  if (loading && !forceRender) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
         <Image 

@@ -7,12 +7,13 @@ import {
   ActivityIndicator, 
   Alert,
   Image,
-  SafeAreaView
+  SafeAreaView,
+  BackHandler
 } from 'react-native';
 import { Camera, CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../types';
 import { useAuth } from '../context/AuthContext';

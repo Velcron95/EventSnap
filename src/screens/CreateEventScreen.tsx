@@ -190,6 +190,13 @@ export const CreateEventScreen = () => {
 
       console.log('User authenticated:', user.id);
 
+      // Get user's display name
+      const displayName = user.user_metadata?.display_name || 
+                          user.email?.split('@')[0] || 
+                          `User ${user.id.substring(0, 6)}`;
+      
+      console.log('User display name:', displayName);
+
       // Create the event
       console.log('Creating event with name:', eventName);
       const { data: event, error: eventError } = await supabase
@@ -198,6 +205,7 @@ export const CreateEventScreen = () => {
           name: eventName,
           password: eventPassword,
           created_by: user.id,
+          creator_display_name: displayName
         })
         .select()
         .single();

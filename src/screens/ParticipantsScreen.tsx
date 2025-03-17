@@ -1,14 +1,18 @@
 import React, { useEffect, useState, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, SafeAreaView } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, SafeAreaView, BackHandler } from 'react-native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { EventTabParamList, RootStackParamList } from '../../types';
 import { useEvent } from '../context/EventContext';
+import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../styles/theme';
+import { HeaderBar } from '../components/HeaderBar';
+import { LoadingOverlay } from '../components/LoadingOverlay';
+import { refreshCurrentUserDisplayName } from '../lib/displayNameUtils';
 
 type ParticipantsScreenNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<EventTabParamList, 'Participants'>,
@@ -55,6 +59,64 @@ export const ParticipantsScreen = () => {
   // Get event ID from route params or context
   const eventId = route.params?.eventId || currentEvent?.id;
   const eventName = route.params?.eventName || currentEvent?.name;
+
+  // Add a handler for the back button
+  const handleBackPress = () => {
+    navigation.navigate('Events');
+  };
+
+  // Use useFocusEffect to handle hardware back button
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        // If a modal is open, close it instead of navigating
+        if (showBlockModal) {
+          setShowBlockModal(false);
+          return true;
+        }
+        if (showPasswordModal) {
+          setShowPasswordModal(false);
+          return true;
+        }
+        
+        // Otherwise, let the EventTabNavigator handle it
+        return false;
+      };
+
+      BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      return () => BackHandler.removeEventListener('hardwareBackPress', onBackPress);
+    }, [showBlockModal, showPasswordModal])
+  );
+
+  // Add useFocusEffect to refresh participants when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('ParticipantsScreen focused - refreshing participants to update display names');
+      if (eventId) {
+        // First, refresh the current user's display name in all tables
+        (async () => {
+          try {
+            // Refresh the current user's display name in all tables
+            await refreshCurrentUserDisplayName();
+            console.log('Refreshed current user display name in all tables');
+          } catch (error) {
+            console.error('Error refreshing display name:', error);
+          }
+          
+          // Then fetch participants and blocked users
+          fetchParticipants();
+          if (isCreator) {
+            fetchBlockedUsers();
+          }
+        })();
+      }
+      
+      return () => {
+        // Cleanup if needed
+      };
+    }, [eventId, isCreator])
+  );
 
   useEffect(() => {
     if (!eventId) {
@@ -156,7 +218,7 @@ export const ParticipantsScreen = () => {
       // First, get the event details to get the creator
       const { data: eventData, error: eventError } = await supabase
         .from('events')
-        .select('id, name, created_by, created_at')
+        .select('id, name, created_by, created_at, creator_display_name')
         .eq('id', eventId)
         .single();
         
@@ -181,9 +243,11 @@ export const ParticipantsScreen = () => {
       
       console.log('Participants data:', JSON.stringify(participantsData, null, 2));
       
-      // Get creator's display name
-      let creatorDisplayName = '';
-      if (eventData?.created_by) {
+      // Get creator's display name - use the new creator_display_name field if available
+      let creatorDisplayName = eventData?.creator_display_name || '';
+      
+      // If creator_display_name is not available, fall back to the old method
+      if (!creatorDisplayName && eventData?.created_by) {
         try {
           // First try to get from user table
           const { data: creatorData, error: creatorError } = await supabase
@@ -216,14 +280,9 @@ export const ParticipantsScreen = () => {
                                     `User ${eventData.created_by.substring(0, 6)}`;
                 console.log('Using current user session for creator display name:', creatorDisplayName);
               } else {
-                // As a last resort, query the events table to see if the name is in the event name
-                if (eventData.name && eventData.name.includes('Kim')) {
-                  creatorDisplayName = 'Kim';
-                  console.log('Using name from event title for creator:', creatorDisplayName);
-                } else {
-                  creatorDisplayName = `User ${eventData.created_by.substring(0, 6)}`;
-                  console.log('Using fallback ID for creator display name:', creatorDisplayName);
-                }
+                // As a last resort, use a shortened ID
+                creatorDisplayName = `User ${eventData.created_by.substring(0, 6)}`;
+                console.log('Using fallback ID for creator display name:', creatorDisplayName);
               }
             }
           }
@@ -231,6 +290,8 @@ export const ParticipantsScreen = () => {
           console.error('Error getting creator display name:', err);
           creatorDisplayName = `User ${eventData.created_by.substring(0, 6)}`;
         }
+      } else {
+        console.log('Using creator_display_name from events table:', creatorDisplayName);
       }
       
       // Map the participants data
@@ -853,7 +914,7 @@ export const ParticipantsScreen = () => {
         <View style={styles.eventBanner}>
           <View style={styles.eventNameContainer}>
             <TouchableOpacity 
-              onPress={() => navigation.navigate('Events')}
+              onPress={handleBackPress}
               style={{ marginRight: 10 }}
             >
               <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />

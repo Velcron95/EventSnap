@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share, BackHandler, Modal } from 'react-native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,7 +8,7 @@ import type { EventTabParamList, RootStackParamList } from '../../types';
 import { useEvent } from '../context/EventContext';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Media } from '../types/database';
+import { Media, MediaLike } from '../types/database';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system';
@@ -16,6 +16,8 @@ import * as Sharing from 'expo-sharing';
 import { colors, spacing } from '../styles/theme';
 import { HeaderBar } from '../components/HeaderBar';
 import { LoadingOverlay } from '../components/LoadingOverlay';
+import { refreshCurrentUserDisplayName } from '../lib/displayNameUtils';
+import { RadioButton } from 'react-native-paper';
 
 type GalleryScreenNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<EventTabParamList, 'Gallery'>,
@@ -28,6 +30,8 @@ type MediaWithUser = Media & {
   user: {
     display_name: string;
   };
+  likes_count: number;
+  user_has_liked: boolean;
 };
 
 const { width, height } = Dimensions.get('window');
@@ -38,12 +42,17 @@ export const GalleryScreen = () => {
   const navigation = useNavigation<GalleryScreenNavigationProp>();
   const route = useRoute<GalleryScreenRouteProp>();
   const { currentEvent, isCreator } = useEvent();
+  const { session } = useAuth();
   const [media, setMedia] = useState<MediaWithUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>(undefined);
   const [downloading, setDownloading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<MediaWithUser | null>(null);
+  const [likingInProgress, setLikingInProgress] = useState(false);
+  
+  // Add a ref to track if we've focused before
+  const hasFocusedBefore = useRef(false);
   
   // Multi-select state
   const [selectionMode, setSelectionMode] = useState(false);
@@ -62,11 +71,86 @@ export const GalleryScreen = () => {
   const eventId = route.params?.eventId || currentEvent?.id;
   const eventName = route.params?.eventName || currentEvent?.name;
 
+  // Add new state variables for filtering
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most_likes'>('newest');
+  const [filteredMedia, setFilteredMedia] = useState<MediaWithUser[]>([]);
+
+  // Add a debug effect to check isCreator
+  useEffect(() => {
+    console.log('GalleryScreen mounted - isCreator:', isCreator, 'eventId:', eventId);
+  }, [isCreator, eventId]);
+
   // Add custom back button handler
   useLayoutEffect(() => {
-    // We don't need to set a custom back button since we're using a custom header in App.tsx
-    // that already has a back button to the Events screen
-  }, [navigation]);
+    // Add a hardware back button handler
+    const backHandler = () => {
+      if (selectedMedia) {
+        // If in full screen mode, just close it
+        closeFullScreenImage();
+        return true; // Prevent default behavior
+      } else {
+        // Navigate to Events screen
+        navigation.navigate('Events');
+        return true; // Prevent default behavior
+      }
+    };
+
+    // We don't need to set up the handler here since we're handling it at the EventTabNavigator level
+  }, [navigation, selectedMedia]);
+
+  // Use useFocusEffect to handle hardware back button
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        if (selectedMedia) {
+          // If in full screen mode, just close it
+          closeFullScreenImage();
+          return true; // Prevent default behavior
+        }
+        return false; // Let the EventTabNavigator handle it
+      };
+
+      BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      return () => BackHandler.removeEventListener('hardwareBackPress', onBackPress);
+    }, [selectedMedia])
+  );
+
+  // Add useFocusEffect to refresh media when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('GalleryScreen focused - refreshing media to update display names');
+      
+      if (eventId) {
+        // First, refresh the current user's display name in all tables
+        (async () => {
+          try {
+            // Refresh the current user's display name in all tables
+            await refreshCurrentUserDisplayName();
+            console.log('Refreshed current user display name in all tables');
+          } catch (error) {
+            console.error('Error refreshing display name:', error);
+          }
+          
+          // If we've focused before, this means we're returning to the screen
+          // and should force a refresh to get updated display names
+          if (hasFocusedBefore.current) {
+            console.log('Returning to GalleryScreen - forcing refresh to get updated display names');
+            fetchEventMedia();
+          } else {
+            // First time focusing
+            fetchEventMedia();
+            hasFocusedBefore.current = true;
+          }
+        })();
+      }
+      
+      return () => {
+        // Cleanup if needed
+      };
+    }, [eventId])
+  );
 
   useEffect(() => {
     if (!eventId) {
@@ -111,9 +195,25 @@ export const GalleryScreen = () => {
         console.log('Subscription status:', status);
       });
 
+    // Subscribe to changes in the media_likes table
+    const likesSubscription = supabase
+      .channel('likes-channel')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'media_likes'
+      }, (payload) => {
+        console.log('Likes change event received:', payload);
+        fetchEventMedia();
+      })
+      .subscribe((status) => {
+        console.log('Likes subscription status:', status);
+      });
+
     return () => {
-      console.log('Unsubscribing from media-channel');
+      console.log('Unsubscribing from channels');
       mediaSubscription.unsubscribe();
+      likesSubscription.unsubscribe();
     };
   }, [eventId]);
 
@@ -124,20 +224,270 @@ export const GalleryScreen = () => {
       setLoading(true);
       console.log('Fetching media for event:', eventId);
       
-      // Get media for the current event with user info
-      const { data, error } = await supabase
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+      
+      // First, get the event details to get the creator
+      const { data: eventData, error: eventError } = await supabase
+        .from('events')
+        .select('id, name, created_by, created_at, creator_display_name')
+        .eq('id', eventId)
+        .single();
+        
+      if (eventError) {
+        console.error('Error fetching event details:', eventError);
+        throw eventError;
+      }
+      
+      console.log('Event data:', JSON.stringify(eventData, null, 2));
+      
+      // Get media for the current event with user info only
+      const { data: mediaData, error: mediaError } = await supabase
         .from('media')
         .select(`
           *,
           user:user_id(display_name)
         `)
         .eq('event_id', eventId)
+        .eq('type', 'photo')  // Only fetch photos for the gallery
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-
-      console.log(`Fetched ${data?.length || 0} media items`);
-      setMedia(data as MediaWithUser[]);
+      if (mediaError) throw mediaError;
+      
+      // If we have media, try to fetch likes information separately
+      if (mediaData && mediaData.length > 0) {
+        // Get all media IDs
+        const mediaIds = mediaData.map(item => item.id);
+        
+        // Get all user IDs from media
+        const userIds = mediaData.map(item => item.user_id).filter(Boolean);
+        const uniqueUserIds = [...new Set(userIds)];
+        
+        // Get creator's display name - use the new creator_display_name field if available
+        let creatorDisplayName = eventData?.creator_display_name || '';
+        
+        // If creator_display_name is not available, fall back to the old method
+        if (!creatorDisplayName && eventData?.created_by) {
+          try {
+            // First try to get from user table
+            const { data: creatorData, error: creatorError } = await supabase
+              .from('user')
+              .select('display_name')
+              .eq('id', eventData.created_by)
+              .single();
+              
+            if (!creatorError && creatorData && creatorData.display_name) {
+              creatorDisplayName = creatorData.display_name;
+              console.log('Found creator display name in user table:', creatorDisplayName);
+            } else {
+              console.log('Creator not found in user table, trying to get from auth.users');
+              
+              // Try to get directly from auth.users using a function
+              const { data: authUserData, error: authUserError } = await supabase
+                .rpc('get_user_display_name', { user_id: eventData.created_by });
+                
+              if (!authUserError && authUserData) {
+                creatorDisplayName = authUserData;
+                console.log('Found creator display name from auth.users:', creatorDisplayName);
+              } else {
+                console.log('Failed to get creator display name from auth.users:', authUserError);
+                
+                // Try to get from auth.users metadata via the current user if it's the creator
+                const { data: sessionData } = await supabase.auth.getSession();
+                if (sessionData?.session?.user?.id === eventData.created_by) {
+                  creatorDisplayName = sessionData.session?.user?.user_metadata?.display_name || 
+                                      sessionData.session?.user?.email?.split('@')[0] || 
+                                      `User ${eventData.created_by.substring(0, 6)}`;
+                  console.log('Using current user session for creator display name:', creatorDisplayName);
+                } else {
+                  // As a last resort, use a shortened ID
+                  creatorDisplayName = `User ${eventData.created_by.substring(0, 6)}`;
+                  console.log('Using fallback ID for creator display name:', creatorDisplayName);
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Error getting creator display name:', err);
+            creatorDisplayName = `User ${eventData.created_by.substring(0, 6)}`;
+          }
+        } else {
+          console.log('Using creator_display_name from events table:', creatorDisplayName);
+        }
+        
+        // Get display names from event_participants table
+        const { data: participantsData, error: participantsError } = await supabase
+          .from('event_participants')
+          .select('user_id, display_name')
+          .eq('event_id', eventId)
+          .in('user_id', uniqueUserIds);
+          
+        if (participantsError) {
+          console.error('Error fetching participants:', participantsError);
+        }
+        
+        // Create a map of user IDs to display names from participants
+        const participantDisplayNames: Record<string, string> = {};
+        if (participantsData) {
+          participantsData.forEach(participant => {
+            if (participant.user_id && participant.display_name) {
+              participantDisplayNames[participant.user_id] = participant.display_name;
+            }
+          });
+        }
+        
+        // Fetch display names for users who don't have them in the initial query
+        const usersWithMissingNames = mediaData.filter(item => !item.user?.display_name);
+        
+        if (usersWithMissingNames.length > 0) {
+          console.log(`Fetching display names for ${usersWithMissingNames.length} users`);
+          
+          // Get display names from user table
+          const { data: userData, error: userError } = await supabase
+            .from('user')
+            .select('id, display_name')
+            .in('id', uniqueUserIds);
+            
+          if (!userError && userData) {
+            // Create a map of user IDs to display names
+            const userDisplayNames: Record<string, string> = {};
+            userData.forEach(user => {
+              if (user.id && user.display_name) {
+                userDisplayNames[user.id] = user.display_name;
+              }
+            });
+            
+            // Update media items with display names
+            mediaData.forEach(item => {
+              if (item.user_id && !item.user?.display_name && userDisplayNames[item.user_id]) {
+                item.user = {
+                  display_name: userDisplayNames[item.user_id]
+                };
+              }
+            });
+          }
+        }
+        
+        // Process all media items to ensure they have display names
+        const processDisplayNames = async () => {
+          // Create a copy of the media data to work with
+          const updatedMediaData = [...mediaData];
+          
+          // Process each media item
+          for (const item of updatedMediaData) {
+            // If this media was uploaded by the event creator, use the creator's display name from the event
+            if (item.user_id === eventData?.created_by && eventData?.creator_display_name) {
+              item.user = {
+                display_name: eventData.creator_display_name
+              };
+              console.log(`Set creator display name from event for media ${item.id}: ${eventData.creator_display_name}`);
+            } 
+            // If we have a display name from event_participants, use that
+            else if (item.user_id && participantDisplayNames[item.user_id]) {
+              item.user = {
+                display_name: participantDisplayNames[item.user_id]
+              };
+              console.log(`Set participant display name for media ${item.id}: ${participantDisplayNames[item.user_id]}`);
+            }
+            // Otherwise, ensure there's a fallback display name
+            else if (!item.user || !item.user.display_name) {
+              try {
+                // Try to get display name from auth.users using a function
+                const { data, error } = await supabase
+                  .rpc('get_user_display_name', { user_id: item.user_id });
+                  
+                if (!error && data) {
+                  item.user = {
+                    display_name: data
+                  };
+                  console.log(`Set RPC display name for media ${item.id}: ${data}`);
+                } else {
+                  // If RPC fails, use a shortened ID
+                  const fallbackName = `User ${item.user_id.substring(0, 6)}`;
+                  item.user = {
+                    display_name: fallbackName
+                  };
+                  console.log(`Set fallback display name for media ${item.id}: ${fallbackName}`);
+                }
+              } catch (err) {
+                console.error('Error getting user display name:', err);
+                // If all else fails, use a shortened ID
+                const fallbackName = `User ${item.user_id.substring(0, 6)}`;
+                item.user = {
+                  display_name: fallbackName
+                };
+                console.log(`Set error fallback display name for media ${item.id}: ${fallbackName}`);
+              }
+            }
+          }
+          
+          return updatedMediaData;
+        };
+        
+        // Process display names and then continue with likes processing
+        const updatedMediaData = await processDisplayNames();
+        
+        let allLikes: any[] = [];
+        let likesError = null;
+        
+        try {
+          // Fetch all likes for these media items
+          const response = await supabase
+            .from('media_likes')
+            .select('media_id, user_id')
+            .in('media_id', mediaIds);
+            
+          allLikes = response.data || [];
+          likesError = response.error;
+        } catch (error) {
+          console.error('Error fetching likes:', error);
+          // If there's an error fetching likes, we'll just continue with empty likes
+        }
+        
+        if (likesError && likesError.code === '42P01') {
+          console.log('media_likes table does not exist, skipping likes data');
+          // Table doesn't exist, just use empty likes data
+          allLikes = [];
+        } else if (likesError) {
+          console.error('Error fetching likes:', likesError);
+        }
+        
+        // Process likes data
+        const likesCountMap: Record<string, number> = {};
+        const userLikedMedia: Record<string, boolean> = {};
+        
+        // Initialize with zero likes for all media
+        mediaIds.forEach(id => {
+          likesCountMap[id] = 0;
+          userLikedMedia[id] = false;
+        });
+        
+        // Count likes and check if user liked each media
+        if (allLikes && allLikes.length > 0) {
+          allLikes.forEach(like => {
+            // Increment like count
+            likesCountMap[like.media_id] = (likesCountMap[like.media_id] || 0) + 1;
+            
+            // Check if this is the current user's like
+            if (like.user_id === userId) {
+              userLikedMedia[like.media_id] = true;
+            }
+          });
+        }
+        
+        // Process the data to include likes information
+        const processedData = updatedMediaData.map(item => ({
+          ...item,
+          likes_count: likesCountMap[item.id] || 0,
+          user_has_liked: userLikedMedia[item.id] || false
+        }));
+        
+        console.log(`Fetched ${processedData?.length || 0} media items`);
+        setMedia(processedData as MediaWithUser[]);
+      } else {
+        // No media found
+        setMedia([]);
+      }
     } catch (err) {
       console.error('Error fetching media:', err);
       setError('Failed to load media');
@@ -254,6 +604,7 @@ export const GalleryScreen = () => {
 
   // Toggle selection mode
   const toggleSelectionMode = () => {
+    console.log('toggleSelectionMode called, isCreator:', isCreator);
     if (selectionMode) {
       // Exit selection mode
       setSelectionMode(false);
@@ -369,25 +720,48 @@ export const GalleryScreen = () => {
     const currentIdx = media.findIndex(m => m.id === selectedMedia.id);
     if (currentIdx < media.length - 1) {
       const nextIdx = currentIdx + 1;
+      const nextMedia = media[nextIdx];
+      
+      console.log('Navigating to next image:', {
+        userId: nextMedia.user_id,
+        displayName: nextMedia.user?.display_name,
+        isCreator: nextMedia.user_id === currentEvent?.created_by
+      });
+      
       setCurrentIndex(nextIdx);
-      setSelectedMedia(media[nextIdx]);
+      setSelectedMedia(nextMedia);
     }
   };
-
+  
   const navigateToPreviousImage = () => {
     if (!selectedMedia || media.length <= 1) return;
     
     const currentIdx = media.findIndex(m => m.id === selectedMedia.id);
     if (currentIdx > 0) {
       const prevIdx = currentIdx - 1;
+      const prevMedia = media[prevIdx];
+      
+      console.log('Navigating to previous image:', {
+        userId: prevMedia.user_id,
+        displayName: prevMedia.user?.display_name,
+        isCreator: prevMedia.user_id === currentEvent?.created_by
+      });
+      
       setCurrentIndex(prevIdx);
-      setSelectedMedia(media[prevIdx]);
+      setSelectedMedia(prevMedia);
     }
   };
 
   // Update the selectedMedia setter to also hide the header
   const showFullScreenImage = (item: MediaWithUser) => {
+    console.log('Showing full screen image:', {
+      userId: item.user_id,
+      displayName: item.user?.display_name,
+      isCreator: item.user_id === currentEvent?.created_by
+    });
+    
     setSelectedMedia(item);
+    setFullScreenVisible(true);
     setHeaderVisible(false);
   };
   
@@ -397,13 +771,171 @@ export const GalleryScreen = () => {
     setHeaderVisible(true);
   };
 
-  // Update the renderMediaItem function to use the new showFullScreenImage function
+  // Add this function to show a user-friendly alert about the missing table
+  const showMediaLikesTableMissingAlert = () => {
+    Alert.alert(
+      'Likes Feature Not Available',
+      'The likes feature is not available yet. Please contact the app administrator to enable this feature.',
+      [
+        {
+          text: 'OK',
+          style: 'default'
+        }
+      ]
+    );
+  };
+
+  // Update the handleLikeMedia function to use this alert
+  const handleLikeMedia = async (mediaItem: MediaWithUser) => {
+    if (likingInProgress) return;
+    
+    try {
+      setLikingInProgress(true);
+      
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Error', 'You must be logged in to like media');
+        return;
+      }
+      
+      // Check if media_likes table exists, create it if it doesn't
+      try {
+        console.log('Checking if media_likes table exists...');
+        // Try to create the table if it doesn't exist
+        const { error: createTableError } = await supabase.rpc('create_media_likes_table_if_not_exists');
+        
+        if (createTableError) {
+          console.log('Error calling RPC function, trying direct SQL:', createTableError);
+          
+          // If RPC fails, try direct SQL (requires admin privileges)
+          const { error: sqlError } = await supabase.from('_temp_create_table').select('*').limit(1);
+          console.log('SQL check result:', sqlError ? 'Error' : 'Success');
+          
+          // If we can't create the table, we'll just try to use it anyway
+          // The user might need to ask the admin to create the table
+        }
+      } catch (tableCheckError) {
+        console.error('Error checking/creating table:', tableCheckError);
+      }
+      
+      if (mediaItem.user_has_liked) {
+        // Unlike the media
+        console.log('Unliking media:', mediaItem.id);
+        const { error } = await supabase
+          .from('media_likes')
+          .delete()
+          .eq('media_id', mediaItem.id)
+          .eq('user_id', user.id);
+          
+        if (error) {
+          console.error('Error unliking media:', error);
+          if (error.code === '42P01') { // Table doesn't exist error
+            showMediaLikesTableMissingAlert();
+            return;
+          }
+          throw error;
+        }
+        
+        console.log('Successfully unliked media');
+        
+        // Update local state immediately
+        setMedia(prevMedia => 
+          prevMedia.map(item => 
+            item.id === mediaItem.id 
+              ? { 
+                  ...item, 
+                  likes_count: Math.max(0, item.likes_count - 1),
+                  user_has_liked: false 
+                } 
+              : item
+          )
+        );
+        
+        // If we're viewing this media in full screen, update that too
+        if (selectedMedia?.id === mediaItem.id) {
+          setSelectedMedia({
+            ...selectedMedia,
+            likes_count: Math.max(0, selectedMedia.likes_count - 1),
+            user_has_liked: false
+          });
+        }
+      } else {
+        // Like the media
+        console.log('Liking media:', mediaItem.id);
+        const { error } = await supabase
+          .from('media_likes')
+          .insert({
+            media_id: mediaItem.id,
+            user_id: user.id
+          });
+          
+        if (error) {
+          console.error('Error liking media:', error);
+          if (error.code === '42P01') { // Table doesn't exist error
+            showMediaLikesTableMissingAlert();
+            return;
+          }
+          throw error;
+        }
+        
+        console.log('Successfully liked media');
+        
+        // Update local state immediately
+        setMedia(prevMedia => 
+          prevMedia.map(item => 
+            item.id === mediaItem.id 
+              ? { 
+                  ...item, 
+                  likes_count: item.likes_count + 1,
+                  user_has_liked: true 
+                } 
+              : item
+          )
+        );
+        
+        // If we're viewing this media in full screen, update that too
+        if (selectedMedia?.id === mediaItem.id) {
+          setSelectedMedia({
+            ...selectedMedia,
+            likes_count: selectedMedia.likes_count + 1,
+            user_has_liked: true
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error liking/unliking media:', error);
+      Alert.alert('Error', 'Failed to like/unlike media');
+    } finally {
+      setLikingInProgress(false);
+    }
+  };
+
+  // Update the renderMediaItem function to remove the display name overlay
   const renderMediaItem = ({ item }: { item: MediaWithUser }) => {
+    // Check if this media was uploaded by the event creator
+    const isCreatorMedia = item.user_id === currentEvent?.created_by;
+    
+    // Get the display name to show (only used in full screen view now)
+    let displayName = 'Unknown User';
+    
+    // If it's the creator's media, use the creator_display_name from the event
+    if (isCreatorMedia && currentEvent?.creator_display_name) {
+      displayName = currentEvent.creator_display_name;
+    } 
+    // Otherwise use the display name from the media item
+    else if (item.user?.display_name) {
+      displayName = item.user.display_name;
+    }
+    
     if (selectionMode) {
       const isSelected = selectedItems.includes(item.id);
       return (
         <TouchableOpacity 
-          style={[styles.mediaItem, isSelected && styles.selectedMediaItem]}
+          style={[
+            styles.mediaItem, 
+            isSelected && styles.selectedMediaItem
+          ]}
           onPress={() => toggleItemSelection(item.id)}
         >
           <Image 
@@ -416,6 +948,12 @@ export const GalleryScreen = () => {
               <MaterialIcons name="check-circle" size={24} color="#007AFF" />
             </View>
           )}
+          {item.likes_count > 0 && (
+            <View style={styles.likesCountBadge}>
+              <MaterialIcons name="favorite" size={12} color="#fff" />
+              <Text style={styles.likesCountText}>{item.likes_count}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       );
     }
@@ -425,10 +963,10 @@ export const GalleryScreen = () => {
         style={styles.mediaItem}
         onPress={() => showFullScreenImage(item)}
         onLongPress={() => {
-          if (isCreator) {
-            toggleSelectionMode();
-            toggleItemSelection(item.id);
-          }
+          console.log('onLongPress triggered, isCreator:', isCreator, 'isCreatorMedia:', isCreatorMedia);
+          // Allow any user to enter selection mode
+          toggleSelectionMode();
+          toggleItemSelection(item.id);
         }}
         delayLongPress={500}
       >
@@ -437,17 +975,58 @@ export const GalleryScreen = () => {
           style={styles.mediaThumbnail}
           resizeMode="cover"
         />
+        <View style={styles.mediaAttributionStrip}>
+          <Text style={styles.mediaAttributionText} numberOfLines={1}>
+            by: {displayName}
+          </Text>
+        </View>
+        {item.likes_count > 0 && (
+          <View style={styles.likesCountBadge}>
+            <MaterialIcons name="favorite" size={12} color="#fff" />
+            <Text style={styles.likesCountText}>{item.likes_count}</Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
 
-  // Update the renderFullScreenImage function to use the closeFullScreenImage function
+  // Update the renderFullScreenImage function to properly display user names
   const renderFullScreenImage = () => {
     if (!selectedMedia) return null;
     
     const currentIdx = media.findIndex(m => m.id === selectedMedia.id);
     const hasPrevious = currentIdx > 0;
     const hasNext = currentIdx < media.length - 1;
+    
+    // Check if this media was uploaded by the event creator
+    const isCreatorMedia = selectedMedia.user_id === currentEvent?.created_by;
+    
+    // Get the display name to show - always get the most up-to-date version from the media array
+    let displayName = 'Unknown User';
+    
+    // Find the current version of this media item in the media array
+    const currentMediaItem = media.find(m => m.id === selectedMedia.id);
+    
+    // If it's the creator's media, use the creator_display_name from the event
+    if (isCreatorMedia && currentEvent?.creator_display_name) {
+      displayName = currentEvent.creator_display_name;
+    } 
+    // Use the display name from the current media item in the array (which may have been refreshed)
+    else if (currentMediaItem?.user?.display_name) {
+      displayName = currentMediaItem.user.display_name;
+    }
+    // Fall back to the selected media's display name if needed
+    else if (selectedMedia.user?.display_name) {
+      displayName = selectedMedia.user.display_name;
+    }
+    
+    console.log('Rendering full screen image with user data:', {
+      userId: selectedMedia.user_id,
+      displayName: displayName,
+      isCreator: isCreatorMedia,
+      currentEventCreator: currentEvent?.created_by,
+      creatorDisplayName: currentEvent?.creator_display_name
+    });
     
     return (
       <View style={styles.fullScreenContainer}>
@@ -478,7 +1057,8 @@ export const GalleryScreen = () => {
           <View style={styles.fullScreenFooter}>
             <View style={styles.mediaInfo}>
               <Text style={styles.mediaInfoText}>
-                By: {selectedMedia.user?.display_name || 'Unknown User'}
+                By: {displayName}
+                {isCreatorMedia && <Text style={styles.creatorTag}> (Creator)</Text>}
               </Text>
               <Text style={styles.mediaInfoDate}>
                 {new Date(selectedMedia.created_at).toLocaleString()}
@@ -486,6 +1066,21 @@ export const GalleryScreen = () => {
             </View>
             
             <View style={styles.mediaActions}>
+              <TouchableOpacity
+                style={[
+                  styles.mediaAction,
+                  selectedMedia.user_has_liked && styles.likedAction
+                ]}
+                onPress={() => handleLikeMedia(selectedMedia)}
+                disabled={likingInProgress}
+              >
+                <MaterialIcons 
+                  name={selectedMedia.user_has_liked ? "favorite" : "favorite-border"} 
+                  size={24} 
+                  color="#fff" 
+                />
+              </TouchableOpacity>
+              
               <TouchableOpacity
                 style={styles.mediaAction}
                 onPress={() => downloadMedia(selectedMedia)}
@@ -595,9 +1190,218 @@ export const GalleryScreen = () => {
     }
   };
 
+  // Update all instances of the back button TouchableOpacity
+  const handleBackPress = () => {
+    navigation.navigate('Events');
+  };
+
+  // Add useEffect to apply filters when media or sortBy changes
+  useEffect(() => {
+    if (media.length === 0) {
+      setFilteredMedia([]);
+      return;
+    }
+
+    let sorted = [...media];
+    
+    switch (sortBy) {
+      case 'newest':
+        sorted = sorted.sort((a, b) => 
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        break;
+      case 'oldest':
+        sorted = sorted.sort((a, b) => 
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+        break;
+      case 'most_likes':
+        sorted = sorted.sort((a, b) => b.likes_count - a.likes_count);
+        break;
+    }
+    
+    setFilteredMedia(sorted);
+  }, [media, sortBy]);
+
+  // Add function to toggle filter modal
+  const toggleFilterModal = () => {
+    setFilterModalVisible(!filterModalVisible);
+  };
+
+  // Add function to apply filter
+  const applyFilter = (filter: 'newest' | 'oldest' | 'most_likes') => {
+    setSortBy(filter);
+    setFilterModalVisible(false);
+  };
+
+  // Add filter modal component
+  const renderFilterModal = () => {
+    return (
+      <Modal
+        visible={filterModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={toggleFilterModal}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterHeader}>
+              <Text style={styles.filterTitle}>Filter Photos</Text>
+              <TouchableOpacity onPress={toggleFilterModal}>
+                <MaterialIcons name="close" size={24} color="#000" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.filterOptions}>
+              <Text style={styles.filterSectionTitle}>Sort by</Text>
+              
+              <TouchableOpacity 
+                style={styles.filterOption} 
+                onPress={() => applyFilter('newest')}
+              >
+                <RadioButton
+                  value="newest"
+                  status={sortBy === 'newest' ? 'checked' : 'unchecked'}
+                  onPress={() => applyFilter('newest')}
+                  color={colors.primary}
+                />
+                <Text style={styles.filterOptionText}>Newest first</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.filterOption} 
+                onPress={() => applyFilter('oldest')}
+              >
+                <RadioButton
+                  value="oldest"
+                  status={sortBy === 'oldest' ? 'checked' : 'unchecked'}
+                  onPress={() => applyFilter('oldest')}
+                  color={colors.primary}
+                />
+                <Text style={styles.filterOptionText}>Oldest first</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.filterOption} 
+                onPress={() => applyFilter('most_likes')}
+              >
+                <RadioButton
+                  value="most_likes"
+                  status={sortBy === 'most_likes' ? 'checked' : 'unchecked'}
+                  onPress={() => applyFilter('most_likes')}
+                  color={colors.primary}
+                />
+                <Text style={styles.filterOptionText}>Most likes</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.applyFilterButton}
+              onPress={() => setFilterModalVisible(false)}
+            >
+              <Text style={styles.applyFilterButtonText}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
+        {/* Modern header with gradient background */}
+        <View style={styles.modernHeader}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity 
+              style={styles.backButtonContainer}
+              onPress={handleBackPress}
+            >
+              <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+            
+            <View style={styles.titleContainer}>
+              <Text style={styles.headerTitleMain} numberOfLines={1}>
+                {eventName || 'Gallery'}
+              </Text>
+              <Text style={styles.headerSubtitle} numberOfLines={1}>
+                {`${media.length} ${media.length === 1 ? "photo" : "photos"}`}
+                {selectionMode && ` • ${selectedItems.length} selected`}
+              </Text>
+            </View>
+            
+            <View style={styles.headerActionsContainer}>
+              {/* Filter button */}
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={toggleFilterModal}
+              >
+                <MaterialIcons name="filter-list" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+              
+              {/* Refresh button */}
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={async () => {
+                  console.log('Manual refresh requested');
+                  await refreshCurrentUserDisplayName();
+                  fetchEventMedia();
+                }}
+              >
+                <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+              
+              {/* Download all button */}
+              {!selectionMode && media.length > 0 && (
+                <TouchableOpacity
+                  style={styles.headerActionButton}
+                  onPress={handleDownloadAllPhotos}
+                  disabled={downloadingAll}
+                >
+                  {downloadingAll ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <MaterialIcons name="file-download" size={20} color="#FFFFFF" />
+                  )}
+                </TouchableOpacity>
+              )}
+              
+              {/* Selection mode buttons */}
+              {selectionMode ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.headerActionButton}
+                    onPress={toggleSelectionMode}
+                  >
+                    <MaterialIcons name="close" size={20} color="#FFFFFF" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.headerActionButton, 
+                      styles.deleteButton,
+                      selectedItems.length === 0 && styles.disabledButton
+                    ]}
+                    onPress={deleteSelectedItems}
+                    disabled={selectedItems.length === 0 || multiDeleteInProgress}
+                  >
+                    {multiDeleteInProgress ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <MaterialIcons name="delete" size={20} color="#FFFFFF" />
+                    )}
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.headerActionButton}
+                  onPress={toggleSelectionMode}
+                >
+                  <MaterialIcons name="select-all" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
         <LoadingOverlay isVisible={true} message="Loading gallery..." />
       </View>
     );
@@ -606,7 +1410,99 @@ export const GalleryScreen = () => {
   if (error) {
     return (
       <View style={styles.container}>
-        <View style={styles.centerContainer}>
+        {/* Modern header with gradient background */}
+        <View style={styles.modernHeader}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity 
+              style={styles.backButtonContainer}
+              onPress={handleBackPress}
+            >
+              <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+            
+            <View style={styles.titleContainer}>
+              <Text style={styles.headerTitleMain} numberOfLines={1}>
+                {eventName || 'Gallery'}
+              </Text>
+              <Text style={styles.headerSubtitle} numberOfLines={1}>
+                {`${media.length} ${media.length === 1 ? "photo" : "photos"}`}
+                {selectionMode && ` • ${selectedItems.length} selected`}
+              </Text>
+            </View>
+            
+            <View style={styles.headerActionsContainer}>
+              {/* Filter button */}
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={toggleFilterModal}
+              >
+                <MaterialIcons name="filter-list" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+              
+              {/* Refresh button */}
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={async () => {
+                  console.log('Manual refresh requested');
+                  await refreshCurrentUserDisplayName();
+                  fetchEventMedia();
+                }}
+              >
+                <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+              
+              {/* Download all button */}
+              {!selectionMode && media.length > 0 && (
+                <TouchableOpacity
+                  style={styles.headerActionButton}
+                  onPress={handleDownloadAllPhotos}
+                  disabled={downloadingAll}
+                >
+                  {downloadingAll ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <MaterialIcons name="file-download" size={20} color="#FFFFFF" />
+                  )}
+                </TouchableOpacity>
+              )}
+              
+              {/* Selection mode buttons */}
+              {selectionMode ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.headerActionButton}
+                    onPress={toggleSelectionMode}
+                  >
+                    <MaterialIcons name="close" size={20} color="#FFFFFF" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.headerActionButton, 
+                      styles.deleteButton,
+                      selectedItems.length === 0 && styles.disabledButton
+                    ]}
+                    onPress={deleteSelectedItems}
+                    disabled={selectedItems.length === 0 || multiDeleteInProgress}
+                  >
+                    {multiDeleteInProgress ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <MaterialIcons name="delete" size={20} color="#FFFFFF" />
+                    )}
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.headerActionButton}
+                  onPress={toggleSelectionMode}
+                >
+                  <MaterialIcons name="select-all" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+        <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity 
             style={styles.retryButton}
@@ -622,7 +1518,37 @@ export const GalleryScreen = () => {
   if (media.length === 0) {
     return (
       <View style={styles.container}>
-        <View style={styles.centerContainer}>
+        {/* Modern header with gradient background */}
+        <View style={styles.modernHeader}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity 
+              style={styles.backButtonContainer}
+              onPress={handleBackPress}
+            >
+              <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+            
+            <View style={styles.titleContainer}>
+              <Text style={styles.headerTitleMain} numberOfLines={1}>
+                {eventName || 'Gallery'}
+              </Text>
+              <Text style={styles.headerSubtitle} numberOfLines={1}>
+                {`${media.length} ${media.length === 1 ? "photo" : "photos"}`}
+              </Text>
+            </View>
+            
+            <View style={styles.headerActionsContainer}>
+              {/* Filter button */}
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={toggleFilterModal}
+              >
+                <MaterialIcons name="filter-list" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        <View style={styles.emptyContainer}>
           <MaterialIcons name="photo-library" size={64} color="#8E8E93" />
           <Text style={styles.emptyText}>No photos or videos yet</Text>
           <Text style={styles.emptySubtext}>Take some photos to see them here!</Text>
@@ -640,82 +1566,102 @@ export const GalleryScreen = () => {
     );
   }
 
+  console.log('Render state - selectionMode:', selectionMode, 'isCreator:', isCreator);
+
   return (
     <View style={styles.container}>
-      {headerVisible && eventName && (
-        <View style={styles.eventBanner}>
-          {selectionMode ? (
-            <>
-              <Text style={styles.eventName}>
-                {selectedItems.length} selected
-              </Text>
-              <View style={styles.selectionModeActions}>
-                <TouchableOpacity 
-                  style={styles.selectionModeAction}
+      {/* Modern header with gradient background */}
+      <View style={styles.modernHeader}>
+        <View style={styles.headerContent}>
+          <TouchableOpacity 
+            style={styles.backButtonContainer}
+            onPress={handleBackPress}
+          >
+            <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+          
+          <View style={styles.titleContainer}>
+            <Text style={styles.headerTitleMain} numberOfLines={1}>
+              {eventName || 'Gallery'}
+            </Text>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {`${media.length} ${media.length === 1 ? "photo" : "photos"}`}
+              {selectionMode && ` • ${selectedItems.length} selected`}
+            </Text>
+          </View>
+          
+          <View style={styles.headerActionsContainer}>
+            {/* Filter button */}
+            <TouchableOpacity
+              style={styles.headerActionButton}
+              onPress={toggleFilterModal}
+            >
+              <MaterialIcons name="filter-list" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+            
+            {/* Refresh button */}
+            <TouchableOpacity
+              style={styles.headerActionButton}
+              onPress={async () => {
+                console.log('Manual refresh requested');
+                await refreshCurrentUserDisplayName();
+                fetchEventMedia();
+              }}
+            >
+              <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+            
+            {/* Download all button */}
+            {!selectionMode && media.length > 0 && (
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={handleDownloadAllPhotos}
+                disabled={downloadingAll}
+              >
+                {downloadingAll ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <MaterialIcons name="file-download" size={20} color="#FFFFFF" />
+                )}
+              </TouchableOpacity>
+            )}
+            
+            {/* Selection mode buttons */}
+            {selectionMode ? (
+              <>
+                <TouchableOpacity
+                  style={styles.headerActionButton}
                   onPress={toggleSelectionMode}
                 >
-                  <Text style={styles.selectionModeActionText}>Cancel</Text>
+                  <MaterialIcons name="close" size={20} color="#FFFFFF" />
                 </TouchableOpacity>
-                {isCreator && selectedItems.length > 0 && (
-                  <TouchableOpacity 
-                    style={[styles.selectionModeAction, styles.deleteAction]}
-                    onPress={deleteSelectedItems}
-                    disabled={multiDeleteInProgress}
-                  >
-                    {multiDeleteInProgress ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.selectionModeActionText}>Delete</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </View>
-            </>
-          ) : (
-            <>
-              <View style={styles.eventNameContainer}>
-                <TouchableOpacity 
-                  onPress={() => navigation.navigate('Events')}
-                  style={{ marginRight: 10 }}
+                <TouchableOpacity
+                  style={[
+                    styles.headerActionButton, 
+                    styles.deleteButton,
+                    selectedItems.length === 0 && styles.disabledButton
+                  ]}
+                  onPress={deleteSelectedItems}
+                  disabled={selectedItems.length === 0 || multiDeleteInProgress}
                 >
-                  <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-                <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
-                  Event: {eventName}
-                </Text>
-              </View>
-              <View style={styles.eventActions}>
-                {isCreator && (
-                  <Text style={styles.creatorBadge}>Creator</Text>
-                )}
-                <TouchableOpacity 
-                  style={styles.actionButton}
-                  onPress={handleDownloadAllPhotos}
-                  disabled={downloadingAll || media.length === 0}
-                >
-                  {downloadingAll ? (
+                  {multiDeleteInProgress ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <MaterialIcons 
-                      name="file-download" 
-                      size={24} 
-                      color="#FFFFFF" 
-                    />
+                    <MaterialIcons name="delete" size={20} color="#FFFFFF" />
                   )}
                 </TouchableOpacity>
-                {isCreator && (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={toggleSelectionMode}
-                  >
-                    <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </>
-          )}
+              </>
+            ) : (
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={toggleSelectionMode}
+              >
+                <MaterialIcons name="select-all" size={20} color="#FFFFFF" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
-      )}
+      </View>
       
       {selectedMedia ? (
         renderFullScreenImage()
@@ -739,18 +1685,24 @@ export const GalleryScreen = () => {
           ) : media.length === 0 ? (
             <View style={styles.emptyContainer}>
               <MaterialIcons name="photo-library" size={64} color="#CCCCCC" />
-              <Text style={styles.emptyText}>No photos yet</Text>
-              <Text style={styles.emptySubtext}>Take some photos to get started!</Text>
+              <Text style={styles.emptyText}>No photos or videos yet</Text>
+              <Text style={styles.emptySubtext}>Take some photos to see them here!</Text>
             </View>
           ) : (
             <FlatList
-              data={media}
+              data={filteredMedia}
               renderItem={renderMediaItem}
               keyExtractor={(item) => item.id}
               numColumns={numColumns}
               contentContainerStyle={styles.mediaGrid}
               refreshing={loading}
               onRefresh={fetchEventMedia}
+              showsVerticalScrollIndicator={false}
+              initialNumToRender={12}
+              maxToRenderPerBatch={12}
+              windowSize={5}
+              removeClippedSubviews={true}
+              ListFooterComponent={<View style={{ height: 20 }} />}
             />
           )}
         </>
@@ -761,6 +1713,7 @@ export const GalleryScreen = () => {
       {multiDeleteInProgress && (
         <LoadingOverlay isVisible={true} message="Deleting selected items..." />
       )}
+      {renderFilterModal()}
     </View>
   );
 };
@@ -777,15 +1730,20 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   mediaGrid: {
-    padding: spacing.sm,
+    padding: spacing.xs,
   },
   mediaItem: {
-    width: tileSize - spacing.sm * 2,
-    height: tileSize - spacing.sm * 2,
-    margin: spacing.xs,
-    borderRadius: 8,
+    width: tileSize - spacing.xs * 2,
+    height: tileSize - spacing.xs * 2,
+    margin: spacing.xs / 2,
+    borderRadius: 6,
     overflow: 'hidden',
     backgroundColor: '#f0f0f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+    elevation: 2,
   },
   mediaThumbnail: {
     width: '100%',
@@ -795,11 +1753,13 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: colors.background,
   },
   loadingText: {
     marginTop: spacing.md,
     fontSize: 16,
     color: colors.text.secondary,
+    fontWeight: '500',
   },
   errorContainer: {
     flex: 1,
@@ -827,27 +1787,37 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   emptyText: {
     fontSize: 18,
     fontWeight: 'bold',
     color: colors.text.secondary,
     marginTop: 16,
+    textAlign: 'center',
   },
   emptySubtext: {
     fontSize: 14,
     color: colors.text.tertiary,
     marginTop: 8,
+    marginBottom: 20,
+    textAlign: 'center',
   },
   cameraButton: {
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
     backgroundColor: colors.primary,
     borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
   },
   cameraButtonText: {
     color: '#fff',
     fontWeight: 'bold',
+    fontSize: 16,
   },
   eventBanner: {
     backgroundColor: '#007AFF',
@@ -906,13 +1876,13 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   actionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginHorizontal: 8,
+    marginLeft: 8,
   },
   fullScreenContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -937,23 +1907,28 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   imageCounter: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   fullScreenFooter: {
     position: 'absolute',
@@ -961,7 +1936,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    padding: 16,
+    padding: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -973,6 +1948,9 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   mediaInfoDate: {
     color: 'rgba(255, 255, 255, 0.7)',
@@ -1009,5 +1987,230 @@ const styles = StyleSheet.create({
   },
   deleteAction: {
     backgroundColor: 'rgba(255, 59, 48, 0.8)',
+  },
+  likedAction: {
+    backgroundColor: 'rgba(255, 59, 48, 0.8)',
+  },
+  likesCountBadge: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 12,
+    padding: 2,
+  },
+  likesCountText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  creatorTag: {
+    color: '#4CAF50',
+    fontWeight: 'bold',
+  },
+  creatorBadgeSmall: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(76, 175, 80, 0.7)',
+    borderRadius: 12,
+    padding: 2,
+  },
+  creatorMediaItem: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#4CAF50',
+  },
+  mediaItemOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    padding: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaItemUserName: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  mediaAttributionStrip: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+  },
+  mediaAttributionText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0.5, height: 0.5 },
+    textShadowRadius: 1,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  headerBottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  compactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.primary,
+    height: 50,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  backButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    flex: 1,
+    marginHorizontal: 6,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modernHeader: {
+    backgroundColor: colors.primary,
+    paddingTop: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  backButtonContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  headerTitleMain: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    flex: 1,
+    marginHorizontal: 6,
+  },
+  headerActionsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerSubtitle: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  selectionCount: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(0,122,255,0.7)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  deleteButton: {
+    backgroundColor: 'rgba(255,59,48,0.8)',
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  filterModal: {
+    backgroundColor: '#fff',
+    width: '100%',
+    padding: 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  filterHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  filterTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  filterOptions: {
+    marginTop: 20,
+  },
+  filterSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  filterOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  filterOptionText: {
+    marginLeft: 10,
+  },
+  applyFilterButton: {
+    backgroundColor: colors.primary,
+    padding: 16,
+    borderRadius: 4,
+    alignItems: 'center',
+  },
+  applyFilterButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  titleContainer: {
+    flex: 1,
+    justifyContent: 'center',
   },
 }); 

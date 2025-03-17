@@ -14,6 +14,7 @@ export type Event = {
   name: string;
   password: string;
   created_by: string;
+  creator_display_name?: string;
   created_at: string;
   updated_at: string;
   background_image?: string;
@@ -33,6 +34,13 @@ export type Media = {
   user_id: string;
   url: string;
   type: 'photo' | 'video';
+  created_at: string;
+};
+
+export type MediaLike = {
+  id: string;
+  media_id: string;
+  user_id: string;
   created_at: string;
 };
 
@@ -58,6 +66,11 @@ export type Database = {
         Row: Media;
         Insert: Omit<Media, 'id' | 'created_at'>;
         Update: Partial<Omit<Media, 'id' | 'created_at'>>;
+      };
+      media_likes: {
+        Row: MediaLike;
+        Insert: Omit<MediaLike, 'id' | 'created_at'>;
+        Update: Partial<Omit<MediaLike, 'id' | 'created_at'>>;
       };
     };
   };

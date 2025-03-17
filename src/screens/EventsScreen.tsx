@@ -176,13 +176,13 @@ export const EventsScreen = () => {
     
     // Navigate to event tabs
     navigation.navigate('EventTabs', {
-      eventId: event.id,
-      eventName: event.name,
       screen: 'Gallery',
       params: {
         eventId: event.id,
         eventName: event.name
-      }
+      },
+      eventId: event.id,
+      eventName: event.name
     });
   };
 

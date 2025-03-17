@@ -54,8 +54,11 @@ export const EventConnectionScreen: React.FC = () => {
         {
           text: 'OK',
           onPress: () => {
-            // Navigate to the Events tab
-            navigation.navigate('Main', { screen: 'Events' });
+            // Navigate to the Events screen
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'Events' }],
+            });
           }
         }
       ]

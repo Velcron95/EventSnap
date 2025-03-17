@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EventSnap - Legal Information</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            color: #007AFF;
+        }
+        
+        .tab-container {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: #f1f1f1;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            border-radius: 5px 5px 0 0;
+            margin-right: 5px;
+        }
+        
+        .tab.active {
+            background-color: #007AFF;
+            color: white;
+            border-color: #007AFF;
+        }
+        
+        .content {
+            display: none;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-top: none;
+        }
+        
+        .content.active {
+            display: block;
+        }
+        
+        h2 {
+            color: #007AFF;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        
+        h3 {
+            color: #555;
+        }
+        
+        footer {
+            margin-top: 50px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #777;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .tab {
+                padding: 8px 15px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>EventSnap Legal Information</h1>
+        <p>Last Updated: <span id="last-updated">[Current Date]</span></p>
+    </header>
+    
+    <div class="tab-container">
+        <div class="tab active" onclick="openTab(event, 'privacy')">Privacy Policy</div>
+        <div class="tab" onclick="openTab(event, 'terms')">Terms of Service</div>
+    </div>
+    
+    <div id="privacy" class="content active">
+        <h2>Privacy Policy</h2>
+        
+        <h3>Introduction</h3>
+        <p>Welcome to EventSnap. We respect your privacy and are committed to protecting your personal data. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our EventSnap mobile application.</p>
+        <p>Please read this Privacy Policy carefully. If you do not agree with the terms of this Privacy Policy, please do not access or use the application.</p>
+        
+        <h3>Information We Collect</h3>
+        <h4>Personal Data</h4>
+        <p>We may collect personal information that you voluntarily provide when using EventSnap, including:</p>
+        <ul>
+            <li><strong>Account Information</strong>: Email address, display name, and password when you create an account</li>
+            <li><strong>Profile Information</strong>: Any profile information you choose to add</li>
+            <li><strong>Event Data</strong>: Information about events you create or join, including event names, passwords, and participant lists</li>
+            <li><strong>Media Content</strong>: Photos and other media you upload to events</li>
+            <li><strong>User Interactions</strong>: Information about your interactions with events and other users, such as likes on media</li>
+        </ul>
+        
+        <h4>Automatically Collected Data</h4>
+        <p>When you use our application, we may automatically collect certain information, including:</p>
+        <ul>
+            <li><strong>Device Information</strong>: Device type, operating system, unique device identifiers</li>
+            <li><strong>Usage Data</strong>: How you interact with our application, features you use, and time spent on the application</li>
+            <li><strong>Log Data</strong>: Error reports, app activity, and performance data</li>
+        </ul>
+        
+        <h3>How We Use Your Information</h3>
+        <p>We use the information we collect for various purposes, including:</p>
+        <ul>
+            <li>Providing, maintaining, and improving EventSnap</li>
+            <li>Creating and managing your account</li>
+            <li>Processing event creation, joining, and participation</li>
+            <li>Storing and displaying media content you upload</li>
+            <li>Sending notifications about activity in your events</li>
+            <li>Responding to your requests and customer service needs</li>
+            <li>Analyzing usage patterns to improve user experience</li>
+            <li>Preventing fraudulent activity and enhancing security</li>
+        </ul>
+        
+        <h3>Data Storage and Security</h3>
+        <p>Your data is stored using Supabase, a secure database platform. We implement appropriate technical and organizational measures to protect your personal information against unauthorized access, alteration, disclosure, or destruction.</p>
+        <p>Media files are stored in secure cloud storage with restricted access. Event passwords and sensitive information are handled with appropriate security measures.</p>
+        
+        <h3>Sharing Your Information</h3>
+        <p>We do not sell your personal information to third parties. We may share your information in the following circumstances:</p>
+        <ul>
+            <li><strong>With Event Participants</strong>: Your display name and uploaded media are shared with other participants in events you join</li>
+            <li><strong>Service Providers</strong>: We may share information with third-party vendors who provide services on our behalf</li>
+            <li><strong>Legal Requirements</strong>: We may disclose information if required by law or in response to valid requests by public authorities</li>
+            <li><strong>Business Transfers</strong>: In connection with a merger, acquisition, or sale of assets, your information may be transferred as a business asset</li>
+        </ul>
+        
+        <h3>Your Rights and Choices</h3>
+        <p>Depending on your location, you may have certain rights regarding your personal information:</p>
+        <ul>
+            <li><strong>Access</strong>: You can request access to your personal data</li>
+            <li><strong>Correction</strong>: You can request correction of inaccurate data</li>
+            <li><strong>Deletion</strong>: You can request deletion of your account and associated data</li>
+            <li><strong>Restriction</strong>: You can request restriction of processing of your data</li>
+            <li><strong>Data Portability</strong>: You can request a copy of your data in a structured format</li>
+            <li><strong>Objection</strong>: You can object to the processing of your personal data</li>
+        </ul>
+        <p>To exercise these rights, please contact us using the information provided at the end of this policy.</p>
+        
+        <h3>Children's Privacy</h3>
+        <p>EventSnap is not intended for children under 13 years of age. We do not knowingly collect personal information from children under 13. If you are a parent or guardian and believe your child has provided us with personal information, please contact us.</p>
+        
+        <h3>Changes to This Privacy Policy</h3>
+        <p>We may update our Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last Updated" date. You are advised to review this Privacy Policy periodically for any changes.</p>
+        
+        <h3>Contact Us</h3>
+        <p>If you have questions or concerns about this Privacy Policy, please contact us at:</p>
+        <p>[Your Contact Email]<br>[Your Company Name]<br>[Your Company Address]</p>
+        
+        <h3>Consent</h3>
+        <p>By using EventSnap, you consent to our Privacy Policy and agree to its terms.</p>
+    </div>
+    
+    <div id="terms" class="content">
+        <h2>Terms of Service</h2>
+        
+        <h3>Introduction</h3>
+        <p>Welcome to EventSnap. These Terms of Service ("Terms") govern your use of the EventSnap mobile application (the "Service") operated by [Your Company Name] ("we," "us," or "our"). By accessing or using the Service, you agree to be bound by these Terms. If you disagree with any part of the Terms, you may not access the Service.</p>
+        
+        <h3>Account Registration</h3>
+        <h4>Account Creation</h4>
+        <p>To use certain features of the Service, you must register for an account. When you register, you agree to provide accurate, current, and complete information and to update this information to maintain its accuracy.</p>
+        
+        <h4>Account Security</h4>
+        <p>You are responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account. You agree to notify us immediately of any unauthorized use of your account or any other breach of security.</p>
+        
+        <h3>User Conduct</h3>
+        <h4>Acceptable Use</h4>
+        <p>You agree to use the Service only for lawful purposes and in accordance with these Terms. You agree not to:</p>
+        <ul>
+            <li>Use the Service in any way that violates any applicable law or regulation</li>
+            <li>Impersonate any person or entity or falsely state or misrepresent your affiliation with a person or entity</li>
+            <li>Interfere with or disrupt the Service or servers or networks connected to the Service</li>
+            <li>Collect or store personal data about other users without their consent</li>
+            <li>Use the Service to send unsolicited communications, promotions, or advertisements</li>
+            <li>Attempt to gain unauthorized access to any portion of the Service</li>
+        </ul>
+        
+        <h4>Content Guidelines</h4>
+        <p>You are solely responsible for the content you upload, post, or share through the Service. Content that is illegal, offensive, threatening, defamatory, infringing on intellectual property rights, invasive of privacy, or otherwise objectionable is prohibited.</p>
+        
+        <h3>Events and Media Content</h3>
+        <h4>Event Creation and Management</h4>
+        <p>When you create an event in EventSnap, you are responsible for managing access to that event, including setting appropriate passwords and controlling who can join.</p>
+        
+        <h4>Media Sharing</h4>
+        <p>By uploading photos or other media to events, you grant other event participants the right to view and interact with that content within the context of the event.</p>
+        
+        <h4>Content Ownership</h4>
+        <p>You retain all ownership rights to the content you upload to the Service. By uploading content, you grant us a non-exclusive, royalty-free license to use, reproduce, and display such content in connection with providing and improving the Service.</p>
+        
+        <h3>Intellectual Property</h3>
+        <h4>Our Intellectual Property</h4>
+        <p>The Service and its original content, features, and functionality are and will remain the exclusive property of [Your Company Name] and its licensors. The Service is protected by copyright, trademark, and other laws.</p>
+        
+        <h4>Feedback</h4>
+        <p>If you provide us with any feedback or suggestions regarding the Service, you assign to us all rights in such feedback and agree that we have the right to use such feedback without restriction and without compensation to you.</p>
+        
+        <h3>Termination</h3>
+        <p>We may terminate or suspend your account and access to the Service immediately, without prior notice or liability, for any reason, including if you breach these Terms.</p>
+        <p>Upon termination, your right to use the Service will immediately cease. If you wish to terminate your account, you may simply discontinue using the Service or contact us to request account deletion.</p>
+        
+        <h3>Disclaimers</h3>
+        <h4>Service Availability</h4>
+        <p>The Service is provided on an "AS IS" and "AS AVAILABLE" basis. We do not guarantee that the Service will always be available, uninterrupted, or error-free.</p>
+        
+        <h4>Content Disclaimer</h4>
+        <p>We do not control, endorse, or take responsibility for any user-generated content available through the Service. You are responsible for your own use of the Service and the content you choose to access.</p>
+        
+        <h3>Limitation of Liability</h3>
+        <p>To the maximum extent permitted by law, in no event shall [Your Company Name], its directors, employees, partners, agents, suppliers, or affiliates be liable for any indirect, incidental, special, consequential, or punitive damages, including without limitation, loss of profits, data, use, goodwill, or other intangible losses, resulting from:</p>
+        <ul>
+            <li>Your use or inability to use the Service</li>
+            <li>Any unauthorized access to or use of our servers and/or any personal information stored therein</li>
+            <li>Any interruption or cessation of transmission to or from the Service</li>
+            <li>Any bugs, viruses, or other harmful code that may be transmitted through the Service</li>
+        </ul>
+        
+        <h3>Indemnification</h3>
+        <p>You agree to defend, indemnify, and hold harmless [Your Company Name] and its licensees and licensors, and their employees, contractors, agents, officers, and directors, from and against any and all claims, damages, obligations, losses, liabilities, costs or debt, and expenses, resulting from or arising out of your use of the Service.</p>
+        
+        <h3>Governing Law</h3>
+        <p>These Terms shall be governed by and construed in accordance with the laws of [Your Jurisdiction], without regard to its conflict of law provisions.</p>
+        
+        <h3>Changes to Terms</h3>
+        <p>We reserve the right to modify or replace these Terms at any time. We will provide notice of any changes by posting the new Terms on this page and updating the "Last Updated" date. You are advised to review these Terms periodically for any changes.</p>
+        
+        <h3>Contact Us</h3>
+        <p>If you have any questions about these Terms, please contact us at:</p>
+        <p>[Your Contact Email]<br>[Your Company Name]<br>[Your Company Address]</p>
+        
+        <h3>Acceptance of Terms</h3>
+        <p>By using EventSnap, you acknowledge that you have read, understood, and agree to be bound by these Terms of Service.</p>
+    </div>
+    
+    <footer>
+        <p>&copy; <span id="current-year"></span> EventSnap. All rights reserved.</p>
+    </footer>
+    
+    <script>
+        function openTab(evt, tabName) {
+            var i, content, tabs;
+            
+            // Hide all content
+            content = document.getElementsByClassName("content");
+            for (i = 0; i < content.length; i++) {
+                content[i].className = content[i].className.replace(" active", "");
+            }
+            
+            // Remove active class from all tabs
+            tabs = document.getElementsByClassName("tab");
+            for (i = 0; i < tabs.length; i++) {
+                tabs[i].className = tabs[i].className.replace(" active", "");
+            }
+            
+            // Show the current tab and add active class
+            document.getElementById(tabName).className += " active";
+            evt.currentTarget.className += " active";
+        }
+        
+        // Set current year in footer
+        document.getElementById("current-year").textContent = new Date().getFullYear();
+        
+        // Set last updated date
+        const options = { year: 'numeric', month: 'long', day: 'numeric' };
+        document.getElementById("last-updated").textContent = new Date().toLocaleDateString(undefined, options);
+    </script>
+</body>
+</html> 

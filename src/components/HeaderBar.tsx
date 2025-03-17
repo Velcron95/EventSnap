@@ -16,9 +16,13 @@ import { colors, typography, spacing } from '../styles/theme';
 
 interface HeaderBarProps {
   title?: string;
+  rightComponent?: React.ReactNode;
 }
 
-export const HeaderBar: React.FC<HeaderBarProps> = ({ title }) => {
+export const HeaderBar: React.FC<HeaderBarProps> = ({ 
+  title,
+  rightComponent
+}) => {
   const navigation = useNavigation();
   const { session } = useAuth();
   const [userDisplayName, setUserDisplayName] = useState<string>('');
@@ -67,9 +71,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({ title }) => {
                 onPress={() => navigation.goBack()}
                 style={styles.backButton}
               >
-                <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
+                <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
               </TouchableOpacity>
-              <Text style={styles.title}>{title}</Text>
+              <Text style={styles.title} numberOfLines={1}>{title}</Text>
             </>
           ) : (
             <>
@@ -78,23 +82,29 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({ title }) => {
                 style={styles.logo}
                 resizeMode="contain"
               />
-              <Text style={styles.appName}>EventSnap</Text>
+              <Text style={styles.appName} numberOfLines={1}>EventSnap</Text>
             </>
           )}
         </View>
         
-        <View style={styles.userContainer}>
-          {userDisplayName ? (
-            <Text style={styles.userName}>Hi, {userDisplayName}</Text>
-          ) : null}
-          
-          <TouchableOpacity 
-            style={styles.profileButton}
-            onPress={handleProfilePress}
-          >
-            <MaterialIcons name="account-circle" size={28} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
+        {rightComponent ? (
+          <View style={styles.rightComponentContainer}>
+            {rightComponent}
+          </View>
+        ) : (
+          <View style={styles.userContainer}>
+            {userDisplayName ? (
+              <Text style={styles.userName} numberOfLines={1}>Hi, {userDisplayName}</Text>
+            ) : null}
+            
+            <TouchableOpacity 
+              style={styles.profileButton}
+              onPress={handleProfilePress}
+            >
+              <MaterialIcons name="account-circle" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -103,13 +113,14 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({ title }) => {
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.primary,
-    paddingTop: Platform.OS === 'ios' ? 28 : (StatusBar.currentHeight || 0) * 0.7,
+    paddingTop: Platform.OS === 'ios' ? 20 : (StatusBar.currentHeight || 0) * 0.5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.3,
     shadowRadius: 2,
     elevation: 3,
     zIndex: 10,
+    height: Platform.OS === 'ios' ? 70 : (StatusBar.currentHeight || 0) + 50,
   },
   content: {
     flexDirection: 'row',
@@ -117,16 +128,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    height: 45,
+    height: 50,
+    maxHeight: 50,
   },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    flexShrink: 1,
+    maxHeight: 50,
   },
   logo: {
     width: 32,
     height: 32,
     borderRadius: 16,
+    maxWidth: 32,
+    maxHeight: 32,
   },
   appName: {
     color: '#FFFFFF',
@@ -139,6 +156,7 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.md,
     fontWeight: 'bold',
     marginLeft: spacing.sm,
+    flexShrink: 1,
   },
   userContainer: {
     flexDirection: 'row',
@@ -154,5 +172,11 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 4,
+  },
+  rightComponentContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    maxHeight: 50,
   },
 }); 

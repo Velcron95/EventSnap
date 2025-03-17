@@ -18,6 +18,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { colors, typography, spacing, borderRadius } from '../styles/theme';
 import { HeaderBar } from '../components/HeaderBar';
+import { updateUserDisplayNameEverywhere } from '../lib/displayNameUtils';
 
 export const ProfileSettingsScreen = () => {
   const navigation = useNavigation();
@@ -76,32 +77,20 @@ export const ProfileSettingsScreen = () => {
     try {
       setLoading(true);
       
-      // Update display name in user table
-      const { error: profileError } = await supabase
-        .from('user')
-        .update({ display_name: displayName.trim() })
-        .eq('id', session?.user?.id);
-        
-      if (profileError) {
-        console.error('Error updating profile:', profileError);
-        Alert.alert('Error', 'Failed to update profile');
-        return;
-      }
-      
-      // Update user metadata
-      const { error: metadataError } = await supabase.auth.updateUser({
-        data: { display_name: displayName.trim() }
-      });
-      
-      if (metadataError) {
-        console.error('Error updating user metadata:', metadataError);
-        // Continue anyway since the database was updated
+      // Use the utility function to update display name everywhere
+      if (session?.user?.id) {
+        await updateUserDisplayNameEverywhere(session.user.id, displayName.trim());
+      } else {
+        throw new Error('No user session found');
       }
       
       setUpdateSuccess(true);
       setTimeout(() => setUpdateSuccess(false), 3000);
       
-      Alert.alert('Success', 'Profile updated successfully');
+      Alert.alert(
+        'Success', 
+        'Your profile has been updated successfully. Your new display name will be shown in all events, galleries, and participant lists.'
+      );
     } catch (error) {
       console.error('Unexpected error updating profile:', error);
       Alert.alert('Error', 'An unexpected error occurred');
@@ -236,6 +225,9 @@ export const ProfileSettingsScreen = () => {
                 onChangeText={setDisplayName}
                 placeholder="Enter your display name"
               />
+              <Text style={styles.helperText}>
+                Your display name will be visible to other users in events, galleries, and participant lists.
+              </Text>
             </View>
             
             <View style={styles.inputContainer}>
@@ -525,5 +517,9 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: typography.sizes.xs,
     color: colors.text.tertiary,
+  },
+  helperText: {
+    fontSize: typography.sizes.sm,
+    color: colors.text.secondary,
   },
 }); 

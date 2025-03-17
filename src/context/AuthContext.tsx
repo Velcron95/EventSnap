@@ -22,6 +22,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Check for existing session and rememberMe flag
     const checkSession = async () => {
       try {
+        // Add a timeout to ensure we don't get stuck on the loading screen
+        const timeoutId = setTimeout(() => {
+          console.log('Session check timed out, setting loading to false');
+          setLoading(false);
+        }, 5000); // 5 second timeout
+
         const rememberMe = await AsyncStorage.getItem('rememberMe');
         console.log('Remember me flag:', rememberMe);
         
@@ -45,6 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         setSession(data.session);
         setLoading(false);
+        clearTimeout(timeoutId); // Clear the timeout if everything completes successfully
       } catch (error) {
         console.error('Error checking session:', error);
         setLoading(false);
