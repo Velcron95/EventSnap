@@ -16,6 +16,8 @@ export type Event = {
   created_by: string;
   created_at: string;
   updated_at: string;
+  background_image?: string;
+  participant_count?: number;
 };
 
 export type EventParticipant = {

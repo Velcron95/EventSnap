@@ -1,17 +1,21 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar } from 'react-native';
+import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { EventTabParamList, RootStackParamList } from '../../types';
 import { useEvent } from '../context/EventContext';
+import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Media } from '../types/database';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { colors, spacing } from '../styles/theme';
+import { HeaderBar } from '../components/HeaderBar';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 
 type GalleryScreenNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<EventTabParamList, 'Gallery'>,
@@ -48,15 +52,26 @@ export const GalleryScreen = () => {
 
   // Image viewer state
   const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [fullScreenVisible, setFullScreenVisible] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+
+  // Add state to track if HeaderBar should be visible
+  const [headerVisible, setHeaderVisible] = useState(true);
 
   // Get event ID from route params or context
   const eventId = route.params?.eventId || currentEvent?.id;
   const eventName = route.params?.eventName || currentEvent?.name;
 
+  // Add custom back button handler
+  useLayoutEffect(() => {
+    // We don't need to set a custom back button since we're using a custom header in App.tsx
+    // that already has a back button to the Events screen
+  }, [navigation]);
+
   useEffect(() => {
     if (!eventId) {
       Alert.alert('Error', 'No event selected. Please select an event first.');
-      navigation.navigate('Main', { screen: 'Events' });
+      navigation.navigate('Events');
       return;
     }
 
@@ -370,10 +385,22 @@ export const GalleryScreen = () => {
     }
   };
 
+  // Update the selectedMedia setter to also hide the header
+  const showFullScreenImage = (item: MediaWithUser) => {
+    setSelectedMedia(item);
+    setHeaderVisible(false);
+  };
+  
+  // Update the close function to show the header again
+  const closeFullScreenImage = () => {
+    setSelectedMedia(null);
+    setHeaderVisible(true);
+  };
+
+  // Update the renderMediaItem function to use the new showFullScreenImage function
   const renderMediaItem = ({ item }: { item: MediaWithUser }) => {
-    const isSelected = selectedItems.includes(item.id);
-    
     if (selectionMode) {
+      const isSelected = selectedItems.includes(item.id);
       return (
         <TouchableOpacity 
           style={[styles.mediaItem, isSelected && styles.selectedMediaItem]}
@@ -396,7 +423,7 @@ export const GalleryScreen = () => {
     return (
       <TouchableOpacity 
         style={styles.mediaItem}
-        onPress={() => setSelectedMedia(item)}
+        onPress={() => showFullScreenImage(item)}
         onLongPress={() => {
           if (isCreator) {
             toggleSelectionMode();
@@ -414,6 +441,7 @@ export const GalleryScreen = () => {
     );
   };
 
+  // Update the renderFullScreenImage function to use the closeFullScreenImage function
   const renderFullScreenImage = () => {
     if (!selectedMedia) return null;
     
@@ -437,7 +465,7 @@ export const GalleryScreen = () => {
           <View style={styles.fullScreenHeader}>
             <TouchableOpacity 
               style={styles.closeButton}
-              onPress={() => setSelectedMedia(null)}
+              onPress={closeFullScreenImage}
             >
               <MaterialIcons name="close" size={24} color="#fff" />
             </TouchableOpacity>
@@ -508,53 +536,113 @@ export const GalleryScreen = () => {
     );
   };
 
+  const handleDownloadAllPhotos = async () => {
+    try {
+      // Request permissions if not already granted
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant permission to save photos to your device.');
+        return;
+      }
+
+      setDownloadingAll(true);
+      
+      // Create a temporary directory to store all images
+      const tempDir = FileSystem.cacheDirectory + 'event_photos/';
+      await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true }).catch(() => {});
+      
+      // Show progress alert
+      Alert.alert(
+        'Downloading Photos',
+        `Downloading ${media.length} photos. This may take a while.`,
+        [{ text: 'OK' }]
+      );
+      
+      // Download each photo
+      const downloadPromises = media.map(async (item, index) => {
+        try {
+          const fileName = `photo_${index + 1}.jpg`;
+          const fileUri = tempDir + fileName;
+          
+          // Download the file
+          await FileSystem.downloadAsync(item.url, fileUri);
+          
+          // Save to media library
+          await MediaLibrary.saveToLibraryAsync(fileUri);
+          
+          return fileUri;
+        } catch (error) {
+          console.error(`Error downloading photo ${index + 1}:`, error);
+          return null;
+        }
+      });
+      
+      const downloadedFiles = await Promise.all(downloadPromises);
+      const successfulDownloads = downloadedFiles.filter(uri => uri !== null);
+      
+      // Show completion alert
+      Alert.alert(
+        'Download Complete',
+        `Successfully downloaded ${successfulDownloads.length} of ${media.length} photos to your device.`,
+        [{ text: 'OK' }]
+      );
+      
+    } catch (error) {
+      console.error('Error downloading all photos:', error);
+      Alert.alert('Download Failed', 'There was an error downloading the photos.');
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <Image 
-          source={require('../../assets/Loading.png')} 
-          style={{ width: 150, height: 150, resizeMode: 'contain' }}
-        />
+      <View style={styles.container}>
+        <LoadingOverlay isVisible={true} message="Loading gallery..." />
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity 
-          style={styles.retryButton}
-          onPress={fetchEventMedia}
-        >
-          <Text style={styles.retryText}>Try Again</Text>
-        </TouchableOpacity>
+      <View style={styles.container}>
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={fetchEventMedia}
+          >
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   if (media.length === 0) {
     return (
-      <View style={styles.centerContainer}>
-        <MaterialIcons name="photo-library" size={64} color="#8E8E93" />
-        <Text style={styles.emptyText}>No photos or videos yet</Text>
-        <Text style={styles.emptySubtext}>Take some photos to see them here!</Text>
-        <TouchableOpacity 
-          style={styles.cameraButton}
-          onPress={() => {
-            console.log('Navigating to Camera with eventId:', eventId);
-            navigation.navigate('Camera', { eventId });
-          }}
-        >
-          <Text style={styles.cameraButtonText}>Go to Camera</Text>
-        </TouchableOpacity>
+      <View style={styles.container}>
+        <View style={styles.centerContainer}>
+          <MaterialIcons name="photo-library" size={64} color="#8E8E93" />
+          <Text style={styles.emptyText}>No photos or videos yet</Text>
+          <Text style={styles.emptySubtext}>Take some photos to see them here!</Text>
+          <TouchableOpacity 
+            style={styles.cameraButton}
+            onPress={() => {
+              console.log('Navigating to Camera with eventId:', eventId);
+              navigation.navigate('Camera', { eventId });
+            }}
+          >
+            <Text style={styles.cameraButtonText}>Go to Camera</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      {eventName && (
+      {headerVisible && eventName && (
         <View style={styles.eventBanner}>
           {selectionMode ? (
             <>
@@ -585,35 +673,94 @@ export const GalleryScreen = () => {
             </>
           ) : (
             <>
-              <Text style={styles.eventName}>Event: {eventName}</Text>
-              {isCreator && (
-                <View style={styles.eventActions}>
+              <View style={styles.eventNameContainer}>
+                <TouchableOpacity 
+                  onPress={() => navigation.navigate('Events')}
+                  style={{ marginRight: 10 }}
+                >
+                  <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+                <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
+                  Event: {eventName}
+                </Text>
+              </View>
+              <View style={styles.eventActions}>
+                {isCreator && (
                   <Text style={styles.creatorBadge}>Creator</Text>
+                )}
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={handleDownloadAllPhotos}
+                  disabled={downloadingAll || media.length === 0}
+                >
+                  {downloadingAll ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <MaterialIcons 
+                      name="file-download" 
+                      size={24} 
+                      color="#FFFFFF" 
+                    />
+                  )}
+                </TouchableOpacity>
+                {isCreator && (
                   <TouchableOpacity 
-                    style={styles.selectButton}
+                    style={styles.actionButton}
                     onPress={toggleSelectionMode}
                   >
-                    <MaterialIcons name="select-all" size={20} color="#fff" />
-                    <Text style={styles.selectButtonText}>Select</Text>
+                    <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
                   </TouchableOpacity>
-                </View>
-              )}
+                )}
+              </View>
             </>
           )}
         </View>
       )}
       
-      <FlatList
-        data={media}
-        renderItem={renderMediaItem}
-        keyExtractor={(item) => item.id}
-        numColumns={numColumns}
-        contentContainerStyle={styles.mediaGrid}
-        refreshing={loading}
-        onRefresh={fetchEventMedia}
-      />
-
-      {selectedMedia && !selectionMode && renderFullScreenImage()}
+      {selectedMedia ? (
+        renderFullScreenImage()
+      ) : (
+        <>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.loadingText}>Loading media...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity 
+                style={styles.retryButton}
+                onPress={fetchEventMedia}
+              >
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : media.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <MaterialIcons name="photo-library" size={64} color="#CCCCCC" />
+              <Text style={styles.emptyText}>No photos yet</Text>
+              <Text style={styles.emptySubtext}>Take some photos to get started!</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={media}
+              renderItem={renderMediaItem}
+              keyExtractor={(item) => item.id}
+              numColumns={numColumns}
+              contentContainerStyle={styles.mediaGrid}
+              refreshing={loading}
+              onRefresh={fetchEventMedia}
+            />
+          )}
+        </>
+      )}
+      {downloadingAll && (
+        <LoadingOverlay isVisible={true} message="Downloading all photos..." />
+      )}
+      {multiDeleteInProgress && (
+        <LoadingOverlay isVisible={true} message="Deleting selected items..." />
+      )}
     </View>
   );
 };
@@ -627,110 +774,80 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: spacing.lg,
+    padding: 20,
   },
   mediaGrid: {
-    padding: 1,
+    padding: spacing.sm,
   },
   mediaItem: {
-    width: tileSize,
-    height: tileSize,
-    padding: 1,
+    width: tileSize - spacing.sm * 2,
+    height: tileSize - spacing.sm * 2,
+    margin: spacing.xs,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
   },
   mediaThumbnail: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#E5E5EA',
   },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#8E8E93',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
     marginTop: spacing.md,
+    fontSize: 16,
+    color: colors.text.secondary,
   },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#8E8E93',
-    marginTop: spacing.sm,
-    marginBottom: spacing.lg,
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
   errorText: {
     fontSize: 16,
-    color: '#FF3B30',
-    marginBottom: spacing.md,
+    color: colors.danger,
+    textAlign: 'center',
+    marginBottom: 16,
   },
   retryButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 4,
   },
   retryText: {
     color: '#fff',
     fontWeight: 'bold',
   },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text.secondary,
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: colors.text.tertiary,
+    marginTop: 8,
+  },
   cameraButton: {
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
     borderRadius: 8,
   },
   cameraButtonText: {
     color: '#fff',
     fontWeight: 'bold',
-  },
-  mediaPreviewOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  mediaPreviewContainer: {
-    width: '90%',
-    maxHeight: '80%',
-    backgroundColor: '#1C1C1E',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  mediaPreview: {
-    width: '100%',
-    height: 300,
-    backgroundColor: '#000',
-  },
-  mediaPreviewInfo: {
-    padding: spacing.md,
-  },
-  mediaPreviewUser: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  mediaPreviewDate: {
-    color: '#8E8E93',
-    fontSize: 14,
-    marginTop: 4,
-  },
-  mediaPreviewActions: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: '#2C2C2E',
-  },
-  mediaPreviewAction: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    backgroundColor: '#007AFF',
-  },
-  deleteAction: {
-    backgroundColor: '#FF3B30',
-  },
-  mediaPreviewActionText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    marginLeft: 8,
   },
   eventBanner: {
     backgroundColor: '#007AFF',
@@ -739,10 +856,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  eventNameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
   eventName: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+    flex: 1,
   },
   creatorBadge: {
     color: '#fff',
@@ -779,20 +903,16 @@ const styles = StyleSheet.create({
   eventActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
   },
-  selectButton: {
-    flexDirection: 'row',
+  actionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    marginLeft: 8,
-  },
-  selectButtonText: {
-    color: '#fff',
-    marginLeft: 4,
-    fontSize: 12,
+    marginHorizontal: 8,
   },
   fullScreenContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -886,5 +1006,8 @@ const styles = StyleSheet.create({
   },
   nextButton: {
     right: 16,
+  },
+  deleteAction: {
+    backgroundColor: 'rgba(255, 59, 48, 0.8)',
   },
 }); 

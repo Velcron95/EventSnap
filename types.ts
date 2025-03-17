@@ -27,8 +27,8 @@ export interface EventParticipant {
 // Tab navigator inside an event
 export type EventTabParamList = {
   Camera: { eventId?: string };
-  Gallery: undefined;
-  Participants: undefined;
+  Gallery: { eventId?: string; eventName?: string };
+  Participants: { eventId?: string; eventName?: string };
 };
 
 // Main tab navigator
@@ -39,9 +39,11 @@ export type TabParamList = {
 // Root stack navigator
 export type RootStackParamList = {
   Main: NavigatorScreenParams<TabParamList>;
+  Events: undefined;
   EventTabs: NavigatorScreenParams<EventTabParamList> & { eventId: string; eventName: string };
   SignIn: undefined;
   SignUp: undefined;
   EventConnection: undefined;
   CreateEvent: undefined;
+  ProfileSettings: undefined;
 }; 

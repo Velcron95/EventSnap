@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useLayoutEffect } from 'react';
+import React, { useEffect, useState, useLayoutEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { Event } from '../types/database';
 import { EventCard } from '../components/EventCard';
 import { Button } from '../components/Button';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
@@ -12,15 +12,14 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { TabParamList, RootStackParamList } from '../../types';
 import { useEvent } from '../context/EventContext';
 import { useAuth } from '../context/AuthContext';
+import { HeaderBar } from '../components/HeaderBar';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 
 type EventWithParticipants = Event & {
   participant_count: number;
 };
 
-type EventsScreenNavigationProp = CompositeNavigationProp<
-  BottomTabNavigationProp<TabParamList, 'Events'>,
-  NativeStackNavigationProp<RootStackParamList>
->;
+type EventsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const EventsScreen = () => {
   const navigation = useNavigation<EventsScreenNavigationProp>();
@@ -30,19 +29,7 @@ export const EventsScreen = () => {
   const [joinedEvents, setJoinedEvents] = useState<EventWithParticipants[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>(undefined);
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <TouchableOpacity 
-          onPress={handleSignOut}
-          style={styles.headerButton}
-        >
-          <MaterialIcons name="logout" size={24} color="#FF3B30" />
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation]);
+  const [creatingEvent, setCreatingEvent] = useState(false);
 
   useEffect(() => {
     fetchUserEvents();
@@ -76,6 +63,17 @@ export const EventsScreen = () => {
       participantsSubscription.unsubscribe();
     };
   }, []);
+
+  // Add useFocusEffect to refresh events when the screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('Events screen focused, refreshing events...');
+      fetchUserEvents();
+      return () => {
+        // Cleanup function when screen loses focus (optional)
+      };
+    }, [])
+  );
 
   const fetchUserEvents = async () => {
     try {
@@ -166,13 +164,25 @@ export const EventsScreen = () => {
 
   const handleEventPress = (event: EventWithParticipants) => {
     // Set the current event in context
+    console.log('Selected event details:', {
+      id: event.id,
+      name: event.name,
+      background_image: event.background_image,
+      created_by: event.created_by,
+      participant_count: event.participant_count
+    });
+    
     setCurrentEvent(event);
     
     // Navigate to event tabs
     navigation.navigate('EventTabs', {
-      screen: 'Gallery',
       eventId: event.id,
-      eventName: event.name
+      eventName: event.name,
+      screen: 'Gallery',
+      params: {
+        eventId: event.id,
+        eventName: event.name
+      }
     });
   };
 
@@ -337,16 +347,39 @@ export const EventsScreen = () => {
     navigation.navigate('CreateEvent');
   };
 
+  const renderEventCard = (event: EventWithParticipants, isCreated: boolean) => {
+    console.log('Rendering event card:', {
+      id: event.id,
+      name: event.name,
+      background_image: event.background_image,
+      created_by: event.created_by
+    });
+    
+    return (
+      <EventCard
+        key={event.id}
+        title={event.name}
+        participantCount={event.participant_count}
+        onPress={() => handleEventPress(event)}
+        style={styles.eventCard}
+        isCreator={isCreated}
+        imageUrl={event.background_image}
+      />
+    );
+  };
+
+  // Loading state
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+      <View style={styles.container}>
+        <LoadingOverlay isVisible={true} message="Loading events..." />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <HeaderBar />
       <ScrollView style={styles.scrollView}>
         {/* Main Action Buttons */}
         <View style={styles.actionButtonsContainer}>
@@ -386,18 +419,7 @@ export const EventsScreen = () => {
               <Text style={styles.emptyText}>You haven't created any events yet</Text>
             </View>
           ) : (
-            createdEvents.map((item) => (
-              <EventCard
-                key={item.id}
-                title={item.name}
-                date={new Date(item.created_at).toLocaleDateString()}
-                location="Event Location" // This would come from the event data in a real app
-                participantCount={item.participant_count}
-                onPress={() => handleEventPress(item)}
-                style={styles.eventCard}
-                isCreator={true}
-              />
-            ))
+            createdEvents.map((item) => renderEventCard(item, true))
           )}
         </View>
 
@@ -415,38 +437,15 @@ export const EventsScreen = () => {
               <Text style={styles.emptyText}>You haven't joined any events yet</Text>
             </View>
           ) : (
-            joinedEvents.map((item) => (
-              <EventCard
-                key={item.id}
-                title={item.name}
-                date={new Date(item.created_at).toLocaleDateString()}
-                location="Event Location" // This would come from the event data in a real app
-                participantCount={item.participant_count}
-                onPress={() => handleEventPress(item)}
-                style={styles.eventCard}
-                isCreator={false}
-              />
-            ))
+            joinedEvents.map((item) => renderEventCard(item, false))
           )}
         </View>
-        
-        {/* Debug and Sign Out Buttons */}
-        <View style={styles.footerContainer}>
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#4CAF50' }]}
-            onPress={checkDatabaseTables}
-          >
-            <Text style={styles.buttonText}>Check Database</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#FF3B30' }]}
-            onPress={handleSignOut}
-          >
-            <Text style={styles.buttonText}>Sign Out</Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
+
+      {/* Show loading overlay when creating event */}
+      {creatingEvent && (
+        <LoadingOverlay isVisible={true} message="Creating event..." />
+      )}
     </View>
   );
 };
@@ -547,10 +546,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#FFFFFF',
-  },
-  headerButton: {
-    marginRight: 16,
-    padding: 8,
   },
   errorContainer: {
     alignItems: 'center',

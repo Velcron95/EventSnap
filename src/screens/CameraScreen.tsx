@@ -12,32 +12,54 @@ import {
 import { Camera, CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../types';
 import { useAuth } from '../context/AuthContext';
 import { useEvent } from '../context/EventContext';
 import { supabase } from '../lib/supabase';
+import { LoadingOverlay } from '../components/LoadingOverlay';
+
+// Define the route params type
+type CameraScreenRouteParams = {
+  eventId?: string;
+};
+
+type CameraScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const CameraScreen = () => {
+  const navigation = useNavigation<CameraScreenNavigationProp>();
+  const route = useRoute();
+  const { session } = useAuth();
+  const { currentEvent, isCreator } = useEvent();
+  
   // Camera state
+  const [permission, requestPermission] = useCameraPermissions();
   const [cameraType, setCameraType] = useState<'front' | 'back'>('back');
   const [flash, setFlash] = useState<'off' | 'on' | 'auto'>('off');
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  
-  // Camera permissions
-  const [permission, requestPermission] = useCameraPermissions();
-  
-  // Refs
+  const [zoom, setZoom] = useState(0);
   const cameraRef = useRef<CameraView>(null);
   
-  // Navigation and context
-  const navigation = useNavigation();
-  const { session } = useAuth();
-  const { currentEvent } = useEvent();
+  // Image preview state
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  
+  // Get event ID from route params or context
+  const routeParams = route.params as CameraScreenRouteParams;
+  const eventId = routeParams?.eventId || currentEvent?.id;
   
   // Get user from session
   const user = session?.user;
-
+  
+  // Check if event is selected
+  useEffect(() => {
+    if (!eventId) {
+      Alert.alert('Error', 'No event selected. Please select an event first.');
+      navigation.navigate('Events');
+      return;
+    }
+  }, [eventId, navigation]);
+  
   // Toggle camera type (front/back)
   const toggleCameraType = () => {
     setCameraType(current => (current === 'back' ? 'front' : 'back'));
@@ -52,6 +74,15 @@ export const CameraScreen = () => {
     });
   };
 
+  // Zoom controls
+  const zoomIn = () => {
+    setZoom(currentZoom => Math.min(currentZoom + 0.1, 1));
+  };
+
+  const zoomOut = () => {
+    setZoom(currentZoom => Math.max(currentZoom - 0.1, 0));
+  };
+
   // Take a picture
   const takePicture = async () => {
     if (!cameraRef.current) return;
@@ -62,7 +93,7 @@ export const CameraScreen = () => {
         exif: false
       });
       if (photo) {
-        setPreviewImage(photo.uri);
+        setCapturedImage(photo.uri);
       }
     } catch (error) {
       console.error('Error taking picture:', error);
@@ -77,9 +108,9 @@ export const CameraScreen = () => {
       return;
     }
 
-    setIsUploading(true);
+    setUploading(true);
     try {
-      console.log('Starting upload process for:', uri);
+      console.log('Starting upload process for photo:', uri);
       
       // Check if file exists
       const fileInfo = await FileSystem.getInfoAsync(uri);
@@ -138,7 +169,7 @@ export const CameraScreen = () => {
         .insert({
           event_id: currentEvent.id,
           user_id: user.id,
-          url: publicURL, // Store the full public URL instead of just the path
+          url: publicURL,
           type: 'photo',
         })
         .select();
@@ -152,17 +183,17 @@ export const CameraScreen = () => {
       Alert.alert('Success', 'Your photo has been uploaded to the event gallery!');
       
       // Clear preview and stay on camera screen
-      setPreviewImage(null);
+      setCapturedImage(null);
     } catch (error: unknown) {
-      console.error('Error uploading media:', error);
+      console.error('Error uploading photo:', error);
       // More detailed error message
-      let errorMessage = 'There was a problem uploading your media.';
+      let errorMessage = 'There was a problem uploading your photo.';
       if (error instanceof Error) {
         errorMessage += ` Error: ${error.message}`;
       }
       Alert.alert('Upload Failed', errorMessage);
     } finally {
-      setIsUploading(false);
+      setUploading(false);
     }
   };
 
@@ -178,15 +209,14 @@ export const CameraScreen = () => {
 
   // Discard the preview and return to camera
   const discardPreview = () => {
-    setPreviewImage(null);
+    setCapturedImage(null);
   };
 
   // Permission handling
   if (!permission) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.text}>Requesting camera permission...</Text>
+        <LoadingOverlay isVisible={true} message="Requesting camera permissions..." />
       </View>
     );
   }
@@ -194,7 +224,7 @@ export const CameraScreen = () => {
   if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>We need your permission to show the camera</Text>
+        <Text style={styles.text}>We need your permission to use the camera</Text>
         <TouchableOpacity 
           style={styles.button}
           onPress={requestPermission}
@@ -212,15 +242,15 @@ export const CameraScreen = () => {
   }
 
   // Show preview if we have an image
-  if (previewImage) {
+  if (capturedImage) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.previewContainer}>
-          <Image source={{ uri: previewImage }} style={styles.preview} />
+          <Image source={{ uri: capturedImage }} style={styles.preview} />
           
           <View style={styles.previewControls}>
-            {isUploading ? (
-              <ActivityIndicator size="large" color="#fff" />
+            {uploading ? (
+              <LoadingOverlay isVisible={true} message="Uploading photo..." />
             ) : (
               <>
                 <TouchableOpacity 
@@ -233,7 +263,7 @@ export const CameraScreen = () => {
                 
                 <TouchableOpacity 
                   style={[styles.previewButton, styles.uploadButton]}
-                  onPress={() => uploadMedia(previewImage)}
+                  onPress={() => uploadMedia(capturedImage)}
                 >
                   <MaterialIcons name="cloud-upload" size={24} color="#fff" />
                   <Text style={styles.buttonText}>Upload to Event</Text>
@@ -254,16 +284,10 @@ export const CameraScreen = () => {
         facing={cameraType}
         enableTorch={flash === 'on'}
         flash={flash}
+        zoom={zoom}
         ref={cameraRef}
       >
         <View style={styles.topControls}>
-          <TouchableOpacity 
-            style={styles.controlButton}
-            onPress={() => navigation.goBack()}
-          >
-            <MaterialIcons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          
           <TouchableOpacity 
             style={styles.controlButton}
             onPress={toggleFlash}
@@ -277,6 +301,24 @@ export const CameraScreen = () => {
               color="#fff" 
             />
           </TouchableOpacity>
+          
+          <View style={styles.zoomControls}>
+            <TouchableOpacity 
+              style={styles.zoomButton}
+              onPress={zoomOut}
+            >
+              <MaterialIcons name="remove" size={24} color="#fff" />
+            </TouchableOpacity>
+            
+            <Text style={styles.zoomText}>{Math.round(zoom * 10)}x</Text>
+            
+            <TouchableOpacity 
+              style={styles.zoomButton}
+              onPress={zoomIn}
+            >
+              <MaterialIcons name="add" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
         
         <View style={styles.bottomControls}>
@@ -294,7 +336,7 @@ export const CameraScreen = () => {
             <View style={styles.captureButtonInner} />
           </TouchableOpacity>
           
-          <View style={styles.controlButton} />
+          <View style={{ width: 50 }} />
         </View>
       </CameraView>
     </View>
@@ -306,6 +348,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingBox: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '80%',
+    maxWidth: 300,
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: 'center',
+  },
   camera: {
     flex: 1,
   },
@@ -313,7 +376,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     padding: 20,
-    paddingTop: 40,
+    paddingTop: 50,
   },
   bottomControls: {
     position: 'absolute',
@@ -394,5 +457,24 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
     paddingHorizontal: 30,
+  },
+  zoomControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+  },
+  zoomButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginHorizontal: 5,
   },
 }); 

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from 'react-native';
+import React, { useEffect, useState, useLayoutEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, SafeAreaView } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
@@ -32,7 +32,7 @@ type Participant = {
 export const ParticipantsScreen = () => {
   const navigation = useNavigation<ParticipantsScreenNavigationProp>();
   const route = useRoute<ParticipantsScreenRouteProp>();
-  const { currentEvent, isCreator, refreshEvent } = useEvent();
+  const { currentEvent, isCreator, refreshEvent, setCurrentEvent } = useEvent();
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -43,6 +43,14 @@ export const ParticipantsScreen = () => {
   const [blockReason, setBlockReason] = useState('');
   const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'participants' | 'blocked'>('participants');
+  const [deletingEvent, setDeletingEvent] = useState(false);
+  
+  // Change password state
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | undefined>(undefined);
 
   // Get event ID from route params or context
   const eventId = route.params?.eventId || currentEvent?.id;
@@ -51,7 +59,7 @@ export const ParticipantsScreen = () => {
   useEffect(() => {
     if (!eventId) {
       Alert.alert('Error', 'No event selected. Please select an event first.');
-      navigation.navigate('Main', { screen: 'Events' });
+      navigation.navigate('Events');
       return;
     }
 
@@ -481,6 +489,251 @@ export const ParticipantsScreen = () => {
     }
   };
 
+  const handleDeleteEventPress = () => {
+    Alert.alert(
+      'Delete Event',
+      'Are you sure you want to delete this event? This will permanently remove all event data including photos, participants, and settings.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: deleteEvent
+        }
+      ]
+    );
+  };
+
+  const deleteEvent = async () => {
+    if (!currentEvent || !isCreator) {
+      Alert.alert('Error', 'You must be the event creator to delete this event');
+      return;
+    }
+
+    setDeletingEvent(true);
+
+    try {
+      console.log('Starting event deletion process for event:', currentEvent.id);
+      
+      // Get current user to verify creator status
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError) {
+        console.error('Error getting user:', userError);
+        throw new Error('Authentication error. Please try again.');
+      }
+      
+      if (!user) {
+        throw new Error('You must be logged in to delete an event');
+      }
+      
+      // Double-check that the current user is the creator
+      if (currentEvent.created_by !== user.id) {
+        throw new Error('Only the event creator can delete this event');
+      }
+      
+      console.log('User authenticated as creator:', user.id);
+      
+      // 1. Delete all media from storage
+      console.log('Deleting event media from storage...');
+      
+      // Get all media for this event
+      const { data: mediaData, error: mediaError } = await supabase
+        .from('media')
+        .select('id, url')
+        .eq('event_id', currentEvent.id);
+      
+      if (mediaError) {
+        console.error('Error fetching media:', mediaError);
+        throw mediaError;
+      }
+      
+      console.log(`Found ${mediaData?.length || 0} media items to delete`);
+      
+      // Extract file paths from URLs
+      const mediaFiles = mediaData?.map(item => {
+        const url = item.url;
+        // Extract the path after /media/
+        const pathMatch = url.match(/\/media\/([^?]+)/);
+        return pathMatch ? pathMatch[1] : null;
+      }).filter(Boolean);
+      
+      console.log('Extracted file paths:', mediaFiles);
+      
+      // Delete files from storage if there are any
+      if (mediaFiles && mediaFiles.length > 0) {
+        console.log(`Attempting to delete ${mediaFiles.length} files from storage`);
+        
+        // Delete files one by one to avoid batch issues
+        for (const filePath of mediaFiles) {
+          try {
+            const { error: singleFileError } = await supabase.storage
+              .from('media')
+              .remove([filePath as string]);
+              
+            if (singleFileError) {
+              console.error(`Error deleting file ${filePath}:`, singleFileError);
+            } else {
+              console.log(`Successfully deleted file: ${filePath}`);
+            }
+          } catch (fileError) {
+            console.error(`Exception deleting file ${filePath}:`, fileError);
+          }
+        }
+      } else {
+        console.log('No media files to delete from storage');
+      }
+      
+      // 2. Delete all media records from the database
+      console.log('Deleting media records from database...');
+      const { error: mediaDeleteError } = await supabase
+        .from('media')
+        .delete()
+        .eq('event_id', currentEvent.id);
+        
+      if (mediaDeleteError) {
+        console.error('Error deleting media records:', mediaDeleteError);
+        // Continue with deletion even if media deletion fails
+      } else {
+        console.log('Successfully deleted media records from database');
+      }
+      
+      // 3. Try to delete from both possible blocked users tables
+      console.log('Deleting blocked users...');
+      
+      // Try to delete from event_blocked_users table
+      try {
+        const { error: blockedDeleteError } = await supabase
+          .from('event_blocked_users')
+          .delete()
+          .eq('event_id', currentEvent.id);
+          
+        if (blockedDeleteError) {
+          console.error('Error deleting from event_blocked_users:', blockedDeleteError);
+        } else {
+          console.log('Successfully deleted records from event_blocked_users');
+        }
+      } catch (error) {
+        console.log('event_blocked_users table might not exist, trying blocked_users');
+      }
+      
+      // Also try to delete from blocked_users table as fallback
+      try {
+        const { error: blockedDeleteError2 } = await supabase
+          .from('blocked_users')
+          .delete()
+          .eq('event_id', currentEvent.id);
+          
+        if (blockedDeleteError2) {
+          console.error('Error deleting from blocked_users:', blockedDeleteError2);
+        } else {
+          console.log('Successfully deleted records from blocked_users');
+        }
+      } catch (error) {
+        console.log('blocked_users table might not exist either');
+      }
+      
+      // 4. Delete all participants
+      console.log('Deleting event participants...');
+      const { error: participantsDeleteError } = await supabase
+        .from('event_participants')
+        .delete()
+        .eq('event_id', currentEvent.id);
+        
+      if (participantsDeleteError) {
+        console.error('Error deleting participants:', participantsDeleteError);
+        // Continue with deletion even if participants deletion fails
+      } else {
+        console.log('Successfully deleted participants from database');
+      }
+      
+      // 5. Finally, delete the event itself
+      console.log('Deleting event...');
+      const { error: eventDeleteError } = await supabase
+        .from('events')
+        .delete()
+        .eq('id', currentEvent.id)
+        .eq('created_by', user.id); // Ensure only the creator can delete
+        
+      if (eventDeleteError) {
+        console.error('Error deleting event:', eventDeleteError);
+        throw new Error(`Failed to delete event: ${eventDeleteError.message}`);
+      }
+      
+      console.log('Event successfully deleted');
+      
+      // Clear the current event from context
+      setCurrentEvent(null);
+      
+      // Show success message
+      Alert.alert(
+        'Success',
+        'Event deleted successfully',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigate back to the Events screen
+              navigation.navigate('Events');
+            }
+          }
+        ]
+      );
+    } catch (error: any) {
+      console.error('Error deleting event:', error);
+      Alert.alert('Error', `Failed to delete event: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setDeletingEvent(false);
+    }
+  };
+
+  // Add a function to handle changing the event password
+  const handleChangePassword = async () => {
+    if (!eventId || !isCreator) {
+      Alert.alert('Error', 'Only the event creator can change the password');
+      return;
+    }
+
+    if (!newPassword) {
+      setPasswordError('Please enter a new password');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+
+    setChangingPassword(true);
+    setPasswordError(undefined);
+
+    try {
+      // Update the event password in the database
+      const { error } = await supabase
+        .from('events')
+        .update({ password: newPassword })
+        .eq('id', eventId);
+
+      if (error) {
+        throw error;
+      }
+
+      // Success
+      Alert.alert('Success', 'Event password has been updated');
+      setShowPasswordModal(false);
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (error) {
+      console.error('Error changing event password:', error);
+      setPasswordError('Failed to update password');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
   const renderParticipantItem = ({ item }: { item: Participant }) => {
     // Check if this participant is the event creator
     const isEventCreator = item.user_id === currentEvent?.created_by;
@@ -595,10 +848,33 @@ export const ParticipantsScreen = () => {
 
   return (
     <View style={styles.container}>
+      {/* Event banner with back button */}
       {eventName && (
         <View style={styles.eventBanner}>
-          <Text style={styles.eventName}>Event: {eventName}</Text>
-          {isCreator && <Text style={styles.creatorBadge}>You are the creator</Text>}
+          <View style={styles.eventNameContainer}>
+            <TouchableOpacity 
+              onPress={() => navigation.navigate('Events')}
+              style={{ marginRight: 10 }}
+            >
+              <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
+              Event: {eventName}
+            </Text>
+          </View>
+          <View style={styles.eventActions}>
+            {isCreator && (
+              <>
+                <Text style={styles.creatorBadge}>Creator</Text>
+                <TouchableOpacity 
+                  style={styles.actionButton}
+                  onPress={() => setShowPasswordModal(true)}
+                >
+                  <MaterialIcons name="vpn-key" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
       )}
       
@@ -741,6 +1017,87 @@ export const ParticipantsScreen = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Add the change password modal */}
+      <Modal
+        visible={showPasswordModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowPasswordModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Event Settings</Text>
+              <TouchableOpacity onPress={() => setShowPasswordModal(false)}>
+                <MaterialIcons name="close" size={24} color={colors.text.primary} />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalSectionTitle}>Change Event Password</Text>
+            <Text style={styles.modalText}>
+              Enter a new password for the event. Make sure to share it with participants who need access.
+            </Text>
+            
+            <TextInput
+              style={styles.input}
+              placeholder="New Password"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              secureTextEntry
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Confirm Password"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry
+            />
+            
+            {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
+            
+            {changingPassword ? (
+              <ActivityIndicator size="small" color={colors.primary} style={styles.modalButton} />
+            ) : (
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={handleChangePassword}
+              >
+                <Text style={styles.modalButtonText}>Update Password</Text>
+              </TouchableOpacity>
+            )}
+
+            <View style={styles.modalDivider} />
+
+            <Text style={[styles.modalSectionTitle, { color: '#FF3B30' }]}>Delete Event</Text>
+            <Text style={styles.modalText}>
+              Permanently delete this event and all associated data including photos and participants.
+              This action cannot be undone.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.deleteEventModalButton}
+              onPress={() => {
+                setShowPasswordModal(false);
+                handleDeleteEventPress();
+              }}
+              disabled={deletingEvent}
+            >
+              <MaterialIcons name="delete-forever" size={20} color="#FFFFFF" />
+              <Text style={styles.deleteEventModalText}>Delete Event</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Show loading overlay when deleting event */}
+      {deletingEvent && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#FFFFFF" />
+          <Text style={styles.loadingText}>Deleting event...</Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -807,9 +1164,10 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: spacing.sm,
+    marginHorizontal: 8,
   },
   removeButton: {
     backgroundColor: '#FF3B30',
@@ -823,9 +1181,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   errorText: {
-    fontSize: 16,
-    color: '#FF3B30',
-    textAlign: 'center',
+    color: colors.danger,
+    marginBottom: 12,
   },
   retryButton: {
     marginTop: spacing.md,
@@ -839,16 +1196,28 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   eventBanner: {
-    backgroundColor: colors.primary,
+    backgroundColor: '#007AFF',
     padding: spacing.md,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  eventNameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
   eventName: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+    flex: 1,
+  },
+  eventActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   creatorBadge: {
     color: '#fff',
@@ -945,20 +1314,100 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     width: '80%',
-    backgroundColor: colors.card,
+    backgroundColor: colors.background,
     borderRadius: 12,
-    padding: spacing.lg,
+    padding: 20,
+    maxWidth: 400,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     color: colors.text.primary,
-    marginBottom: spacing.md,
+  },
+  modalSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    marginBottom: 8,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: 20,
   },
   modalText: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    marginBottom: 16,
+  },
+  input: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
     fontSize: 16,
-    color: colors.text.primary,
-    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  cancelButton: {
+    backgroundColor: colors.border,
+    marginRight: spacing.sm,
+  },
+  blockConfirmButton: {
+    backgroundColor: '#FF3B30',
+  },
+  buttonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  creatorParticipantItem: {
+    backgroundColor: 'rgba(76, 175, 80, 0.1)', // Light green background
+    borderLeftWidth: 3,
+    borderLeftColor: '#4CAF50',
+  },
+  headerButton: {
+    marginRight: 16,
+    padding: 8,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  modalButtonText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   modalSubtext: {
     fontSize: 14,
@@ -974,32 +1423,38 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     minHeight: 80,
   },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  deleteEventContainer: {
+    padding: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
-  modalButton: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: colors.border,
-    marginRight: spacing.sm,
-  },
-  blockConfirmButton: {
+  deleteEventButton: {
     backgroundColor: '#FF3B30',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    borderRadius: 8,
   },
-  buttonText: {
-    color: '#fff',
-    fontWeight: '500',
+  deleteEventText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
     fontSize: 16,
+    marginLeft: 8,
   },
-  creatorParticipantItem: {
-    backgroundColor: 'rgba(76, 175, 80, 0.1)', // Light green background
-    borderLeftWidth: 3,
-    borderLeftColor: '#4CAF50',
+  deleteEventModalButton: {
+    backgroundColor: '#FF3B30',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  deleteEventModalText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginLeft: 8,
   },
 }); 

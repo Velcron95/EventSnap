@@ -44,7 +44,11 @@ const config: ExpoConfig = {
         microphonePermission: 'EventSnap needs access to your microphone to record videos with sound for event sharing.'
       }
     ]
-  ]
+  ],
+  extra: {
+    supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
+    supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+  },
 };
 
 export default config; 

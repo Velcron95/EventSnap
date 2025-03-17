@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
-  ActivityIndicator,
-  FlatList,
   TextInput,
   Modal,
 } from 'react-native';
@@ -24,19 +22,12 @@ import { CompositeNavigationProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types';
 import { useEvent } from '../context/EventContext';
+import { HeaderBar } from '../components/HeaderBar';
 
 type EventConnectionScreenNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<RootStackParamList, 'EventConnection'>,
   BottomTabNavigationProp<TabParamList>
 >;
-
-type EventWithParticipants = {
-  id: string;
-  name: string;
-  created_at: string;
-  created_by: string;
-  participant_count: number;
-};
 
 export const EventConnectionScreen: React.FC = () => {
   const navigation = useNavigation<EventConnectionScreenNavigationProp>();
@@ -44,50 +35,31 @@ export const EventConnectionScreen: React.FC = () => {
   const [eventName, setEventName] = useState('');
   const [eventPassword, setEventPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const [availableEvents, setAvailableEvents] = useState<EventWithParticipants[]>([]);
   
-  // For password modal
+  // For password modal - keeping this for potential future use
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<EventWithParticipants | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
 
-  useEffect(() => {
-    fetchAvailableEvents();
-  }, []);
-
-  const fetchAvailableEvents = async () => {
-    try {
-      setSearchLoading(true);
-      
-      // Get all events with participant counts
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          id,
-          name,
-          created_at,
-          created_by,
-          participant_count:event_participants(count)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      if (error) throw error;
-
-      // Format the data to include participant count
-      const formattedEvents = data.map(event => ({
-        ...event,
-        participant_count: event.participant_count?.[0]?.count || 0
-      }));
-
-      setAvailableEvents(formattedEvents);
-    } catch (err) {
-      console.error('Error fetching available events:', err);
-    } finally {
-      setSearchLoading(false);
-    }
+  const handleJoinSuccess = (event: any) => {
+    // Set the current event in context
+    setCurrentEvent(event);
+    
+    // Show success message
+    Alert.alert(
+      'Success',
+      'You have joined the event!',
+      [
+        {
+          text: 'OK',
+          onPress: () => {
+            // Navigate to the Events tab
+            navigation.navigate('Main', { screen: 'Events' });
+          }
+        }
+      ]
+    );
   };
 
   const handleJoinEvent = async (selectedEventName?: string, selectedEventPassword?: string) => {
@@ -103,10 +75,12 @@ export const EventConnectionScreen: React.FC = () => {
     setError(undefined);
 
     try {
-      console.log('Starting join event process...');
-      
       // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError) {
+        throw userError;
+      }
       
       if (!user) {
         setError('You must be logged in to join an event');
@@ -114,245 +88,162 @@ export const EventConnectionScreen: React.FC = () => {
         return;
       }
 
-      console.log('User authenticated:', user.id);
-
-      // Check event credentials
-      console.log('Looking for event with name:', nameToUse);
-      const { data: event, error: findError } = await supabase
+      // Find the event by name and password
+      const { data: events, error: eventError } = await supabase
         .from('events')
-        .select('id, password')
+        .select('*')
         .eq('name', nameToUse)
-        .single();
-
-      if (findError || !event) {
-        console.error('Event not found:', findError);
-        setError('Event not found');
+        .eq('password', passwordToUse);
+      
+      if (eventError) {
+        throw eventError;
+      }
+      
+      if (!events || events.length === 0) {
+        setError('No event found with that name and password');
         setLoading(false);
         return;
       }
 
-      console.log('Found event:', event.id);
-
-      if (event.password !== passwordToUse) {
-        console.log('Password mismatch. Provided:', passwordToUse, 'Expected:', event.password);
-        setError('Incorrect password');
-        setLoading(false);
-        return;
-      }
-
-      console.log('Password verified');
+      const event = events[0];
 
       // Check if user is already a participant
-      console.log('Checking if user is already a participant...');
-      const { data: existingParticipant, error: participantError } = await supabase
+      const { data: existingParticipant, error: participantCheckError } = await supabase
         .from('event_participants')
-        .select('id')
+        .select('*')
         .eq('event_id', event.id)
         .eq('user_id', user.id)
         .single();
-
-      if (participantError) {
-        console.log('User is not a participant yet:', participantError.message);
+      
+      if (participantCheckError && participantCheckError.code !== 'PGRST116') {
+        throw participantCheckError;
       }
-
+      
       if (existingParticipant) {
-        console.log('User is already a participant:', existingParticipant.id);
-        // User is already a participant, just navigate
-        // Get full event details
-        const { data: fullEvent } = await supabase
-          .from('events')
-          .select('*')
-          .eq('id', event.id)
-          .single();
-          
-        setCurrentEvent(fullEvent);
-        navigation.navigate('Main', { screen: 'Events' });
-        Alert.alert('Success', `You've joined "${nameToUse}"!`);
+        // User is already a participant, just navigate to the event
+        handleJoinSuccess(event);
+        setLoading(false);
         return;
       }
 
-      // Add user to event participants
-      console.log('Adding user to event participants...');
-      const { data: newParticipant, error: joinError } = await supabase
+      // Add user as a participant
+      const { error: joinError } = await supabase
         .from('event_participants')
         .insert({
           event_id: event.id,
           user_id: user.id,
-        })
-        .select();
-
+        });
+      
       if (joinError) {
-        console.error('Error joining event:', joinError);
         throw joinError;
       }
 
-      console.log('Successfully joined event:', newParticipant);
-
-      // Get full event details
-      const { data: fullEvent } = await supabase
-        .from('events')
-        .select('*')
-        .eq('id', event.id)
-        .single();
-        
-      setCurrentEvent(fullEvent);
-
-      // Navigate back to Events screen
-      navigation.navigate('Main', { screen: 'Events' });
-      Alert.alert('Success', `You've joined "${nameToUse}"!`);
-    } catch (err) {
-      setError('Failed to join event. Please try again.');
-      console.error('Join event error:', err);
+      // Success! Navigate to the event
+      handleJoinSuccess(event);
+    } catch (err: any) {
+      console.error('Error joining event:', err);
+      setError(err.message || 'Failed to join event');
     } finally {
       setLoading(false);
-      // Clear password modal state
-      if (passwordModalVisible) {
-        setPasswordModalVisible(false);
-        setPasswordInput('');
-        setSelectedEvent(null);
-      }
+      setPasswordModalVisible(false);
+      setPasswordInput('');
     }
   };
 
-  const openPasswordModal = (event: EventWithParticipants) => {
-    setSelectedEvent(event);
-    setPasswordInput('');
-    setPasswordModalVisible(true);
-  };
-
-  const renderEventItem = ({ item }: { item: EventWithParticipants }) => (
-    <TouchableOpacity 
-      style={styles.eventItem}
-      onPress={() => openPasswordModal(item)}
-    >
-      <View style={styles.eventItemContent}>
-        <Text style={styles.eventName}>{item.name}</Text>
-        <Text style={styles.eventDetails}>
-          Created: {new Date(item.created_at).toLocaleDateString()} • 
-          Participants: {item.participant_count}
-        </Text>
-      </View>
-      <MaterialIcons name="chevron-right" size={24} color="#8E8E93" />
-    </TouchableOpacity>
-  );
-
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.header}>
-          <MaterialIcons name="link" size={48} color="#007AFF" />
-          <Text style={styles.title}>Connect to Event</Text>
-        </View>
-
-        <View style={styles.formContainer}>
-          <Text style={styles.sectionTitle}>Join by Name & Password</Text>
-          
-          <Input
-            label="Event Name"
-            value={eventName}
-            onChangeText={setEventName}
-            placeholder="Enter event name"
-            autoCapitalize="none"
-          />
-          
-          <Input
-            label="Event Password"
-            value={eventPassword}
-            onChangeText={setEventPassword}
-            placeholder="Enter event password"
-            secureTextEntry
-          />
-          
-          {error && <Text style={styles.errorText}>{error}</Text>}
-          
-          <Button
-            title="Join Event"
-            onPress={() => handleJoinEvent()}
-            loading={loading}
-            style={styles.button}
-          />
-        </View>
-
-        <View style={styles.availableEventsContainer}>
-          <Text style={styles.sectionTitle}>Available Events</Text>
-          
-          {searchLoading ? (
-            <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
-          ) : availableEvents.length === 0 ? (
-            <Text style={styles.noEventsText}>No events available</Text>
-          ) : (
-            <FlatList
-              data={availableEvents}
-              renderItem={renderEventItem}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-              style={styles.eventsList}
-            />
-          )}
-          
-          <Button
-            title="Refresh Events"
-            onPress={fetchAvailableEvents}
-            variant="outline"
-            loading={searchLoading}
-            style={styles.refreshButton}
-          />
-        </View>
-      </ScrollView>
-
-      {/* Password Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={passwordModalVisible}
-        onRequestClose={() => setPasswordModalVisible(false)}
+    <View style={styles.container}>
+      <HeaderBar title="Connect to Event" />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.container}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Enter Password</Text>
-            <Text style={styles.modalSubtitle}>
-              {selectedEvent ? `Enter password for "${selectedEvent.name}"` : ''}
-            </Text>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <View style={styles.header}>
+            <MaterialIcons name="link" size={48} color="#007AFF" />
+            <Text style={styles.title}>Connect to Event</Text>
+          </View>
+
+          <View style={styles.formContainer}>
+            <Text style={styles.sectionTitle}>Join by Name & Password</Text>
             
-            <TextInput
-              style={styles.passwordInput}
-              placeholder="Password"
-              value={passwordInput}
-              onChangeText={setPasswordInput}
-              secureTextEntry
-              autoFocus
+            <Input
+              label="Event Name"
+              value={eventName}
+              onChangeText={setEventName}
+              placeholder="Enter event name"
+              autoCapitalize="none"
             />
             
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setPasswordModalVisible(false);
-                  setPasswordInput('');
-                  setSelectedEvent(null);
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
+            <Input
+              label="Event Password"
+              value={eventPassword}
+              onChangeText={setEventPassword}
+              placeholder="Enter event password"
+              secureTextEntry
+            />
+            
+            {error && <Text style={styles.errorText}>{error}</Text>}
+            
+            <Button
+              title="Join Event"
+              onPress={() => handleJoinEvent()}
+              loading={loading}
+              style={styles.button}
+            />
+          </View>
+        </ScrollView>
+
+        {/* Password Modal - keeping this for potential future use */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={passwordModalVisible}
+          onRequestClose={() => setPasswordModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Enter Password</Text>
+              <Text style={styles.modalSubtitle}>
+                {selectedEvent ? `Enter password for "${selectedEvent.name}"` : ''}
+              </Text>
               
-              <TouchableOpacity 
-                style={[styles.modalButton, styles.joinButton]}
-                onPress={() => {
-                  if (selectedEvent && passwordInput) {
-                    handleJoinEvent(selectedEvent.name, passwordInput);
-                  }
-                }}
-              >
-                <Text style={styles.joinButtonText}>Join</Text>
-              </TouchableOpacity>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Password"
+                value={passwordInput}
+                onChangeText={setPasswordInput}
+                secureTextEntry
+                autoFocus
+              />
+              
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => {
+                    setPasswordModalVisible(false);
+                    setPasswordInput('');
+                    setSelectedEvent(null);
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.joinButton]}
+                  onPress={() => {
+                    if (selectedEvent && passwordInput) {
+                      handleJoinEvent(selectedEvent.name, passwordInput);
+                    }
+                  }}
+                >
+                  <Text style={styles.joinButtonText}>Join</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
-    </KeyboardAvoidingView>
+        </Modal>
+      </KeyboardAvoidingView>
+    </View>
   );
 };
 
@@ -396,70 +287,18 @@ const styles = StyleSheet.create({
   button: {
     marginTop: 10,
   },
-  availableEventsContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  loader: {
-    marginVertical: 20,
-  },
-  noEventsText: {
-    textAlign: 'center',
-    color: '#8E8E93',
-    marginVertical: 20,
-  },
-  eventsList: {
-    marginBottom: 16,
-  },
-  eventItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
-  },
-  eventItemContent: {
-    flex: 1,
-  },
-  eventName: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  eventDetails: {
-    fontSize: 14,
-    color: '#8E8E93',
-  },
-  refreshButton: {
-    marginTop: 10,
-  },
-  // Modal styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
   },
   modalContent: {
-    backgroundColor: 'white',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 20,
-    width: '100%',
+    width: '80%',
     maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   modalTitle: {
     fontSize: 18,
@@ -468,44 +307,39 @@ const styles = StyleSheet.create({
   },
   modalSubtitle: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 20,
+    color: '#8E8E93',
+    marginBottom: 16,
   },
   passwordInput: {
-    height: 50,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#E5E5EA',
     borderRadius: 8,
-    marginBottom: 20,
-    paddingHorizontal: 15,
+    padding: 12,
     fontSize: 16,
+    marginBottom: 16,
   },
   modalButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
   },
   modalButton: {
-    flex: 1,
-    height: 44,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
     borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 5,
+    marginLeft: 8,
   },
   cancelButton: {
-    backgroundColor: '#f2f2f2',
+    backgroundColor: '#F2F2F7',
+  },
+  cancelButtonText: {
+    color: '#8E8E93',
+    fontWeight: '600',
   },
   joinButton: {
     backgroundColor: '#007AFF',
   },
-  cancelButtonText: {
-    color: '#666',
-    fontSize: 16,
-    fontWeight: '500',
-  },
   joinButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
 }); 

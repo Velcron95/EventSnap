@@ -4,17 +4,17 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
-  ViewStyle,
+  ImageBackground,
   StyleProp,
+  ViewStyle,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, typography, borderRadius, spacing, shadows } from '../styles/theme';
 
 interface EventCardProps {
   title: string;
-  date: string;
-  location: string;
+  date?: string;
+  location?: string;
   imageUrl?: string;
   participantCount: number;
   onPress: () => void;
@@ -24,109 +24,101 @@ interface EventCardProps {
 
 export const EventCard: React.FC<EventCardProps> = ({
   title,
-  date,
-  location,
-  imageUrl,
   participantCount,
+  imageUrl,
   onPress,
   style,
   isCreator = false,
 }) => {
+  console.log('EventCard rendering with imageUrl:', imageUrl);
+  
   return (
     <TouchableOpacity
       style={[styles.container, shadows.md, style]}
       onPress={onPress}
       activeOpacity={0.7}
     >
-      {imageUrl ? (
-        <Image source={{ uri: imageUrl }} style={styles.image} />
-      ) : (
-        <View style={styles.placeholderImage}>
-          <MaterialIcons name="event" size={32} color={colors.text.tertiary} />
-        </View>
-      )}
-      <View style={styles.content}>
-        <View style={styles.titleRow}>
-          <Text style={styles.title} numberOfLines={1}>
-            {title}
-          </Text>
+      <ImageBackground 
+        source={imageUrl ? { uri: imageUrl } : undefined}
+        style={styles.backgroundImage}
+        imageStyle={{ opacity: 0.9 }}
+        onError={(error) => console.error('Image loading error:', error.nativeEvent.error)}
+      >
+        <View style={[styles.overlay, !imageUrl && styles.placeholderBackground]}>
           {isCreator && (
             <View style={styles.creatorBadge}>
               <Text style={styles.creatorBadgeText}>Creator</Text>
             </View>
           )}
-        </View>
-        <View style={styles.detailsContainer}>
-          <View style={styles.detail}>
-            <MaterialIcons name="event" size={16} color={colors.text.secondary} />
-            <Text style={styles.detailText}>{date}</Text>
-          </View>
-          <View style={styles.detail}>
-            <MaterialIcons name="location-on" size={16} color={colors.text.secondary} />
-            <Text style={styles.detailText} numberOfLines={1}>
-              {location}
+          
+          <View style={styles.titleContainer}>
+            <Text style={styles.title} numberOfLines={2}>
+              {title}
             </Text>
           </View>
-          <View style={styles.detail}>
-            <MaterialIcons name="people" size={16} color={colors.text.secondary} />
-            <Text style={styles.detailText}>
-              {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
-            </Text>
+          
+          <View style={styles.detailsContainer}>
+            <View style={styles.detail}>
+              <MaterialIcons name="people" size={16} color="#FFFFFF" />
+              <Text style={styles.detailText}>
+                {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
+      </ImageBackground>
     </TouchableOpacity>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.card,
+    height: 180,
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
     marginBottom: spacing.md,
   },
-  image: {
+  backgroundImage: {
     width: '100%',
-    height: 150,
-    backgroundColor: colors.surface,
+    height: '100%',
   },
-  placeholderImage: {
-    width: '100%',
-    height: 150,
-    backgroundColor: colors.surface,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  content: {
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     padding: spacing.md,
+    justifyContent: 'space-between',
+  },
+  titleContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
   },
   title: {
-    fontSize: typography.sizes.lg,
-    fontWeight: '600',
-    color: colors.text.primary,
-    marginBottom: spacing.sm,
+    fontSize: typography.sizes.xl,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   detailsContainer: {
-    gap: spacing.xs,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: borderRadius.md,
+    padding: spacing.xs,
   },
   detail: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+    marginBottom: 4,
   },
   detailText: {
     fontSize: typography.sizes.sm,
-    color: colors.text.secondary,
-    flex: 1,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
+    color: '#FFFFFF',
   },
   creatorBadge: {
+    alignSelf: 'flex-end',
     backgroundColor: '#4CAF50',
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -136,5 +128,8 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: typography.sizes.xs,
     fontWeight: '600',
+  },
+  placeholderBackground: {
+    backgroundColor: '#3498db',
   },
 }); 
