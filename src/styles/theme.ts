@@ -1,14 +1,14 @@
 export const colors = {
-  primary: '#007AFF', // iOS blue
-  secondary: '#5856D6', // Deep purple for accents
-  success: '#34C759', // iOS green
-  danger: '#FF3B30', // iOS red
-  warning: '#FF9500', // iOS orange
+  primary: '#6A5ACD', // Festive purple
+  secondary: '#FF69B4', // Hot pink for festive accents
+  success: '#00CED1', // Bright turquoise
+  danger: '#FF4500', // Bright orange-red
+  warning: '#FFD700', // Gold
   background: '#FFFFFF',
   card: '#FFFFFF',
-  surface: '#F2F2F7', // iOS light gray background
+  surface: '#F0F8FF', // Light blue background
   text: {
-    primary: '#000000',
+    primary: '#333333',
     secondary: '#6C6C6C',
     tertiary: '#8E8E93',
     inverse: '#FFFFFF',
