@@ -11,6 +11,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import { useEvent } from '../context/EventContext';
 import { supabase } from '../lib/supabase';
 import { colors, typography, spacing } from '../styles/theme';
 
@@ -25,6 +26,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 }) => {
   const navigation = useNavigation();
   const { session } = useAuth();
+  const { currentEvent } = useEvent();
   const [userDisplayName, setUserDisplayName] = useState<string>('');
   
   useEffect(() => {
@@ -61,7 +63,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={colors.primary} barStyle="light-content" />
+      <StatusBar hidden={true} />
       
       <View style={styles.content}>
         <View style={styles.logoContainer}>
@@ -71,7 +73,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 onPress={() => navigation.goBack()}
                 style={styles.backButton}
               >
-                <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
+                <MaterialIcons name="arrow-back" size={30} color="#FFFFFF" />
               </TouchableOpacity>
               <Text style={styles.title} numberOfLines={1}>{title}</Text>
             </>
@@ -82,7 +84,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 style={styles.logo}
                 resizeMode="contain"
               />
-              <Text style={styles.appName} numberOfLines={1}>EventSnap</Text>
+              <Text style={styles.appName} numberOfLines={1}>
+                {currentEvent?.name || 'EventSnap'}
+              </Text>
             </>
           )}
         </View>
@@ -101,7 +105,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               style={styles.profileButton}
               onPress={handleProfilePress}
             >
-              <MaterialIcons name="account-circle" size={24} color="#FFFFFF" />
+              <MaterialIcons name="account-circle" size={36} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         )}
@@ -113,47 +117,47 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.primary,
-    paddingTop: Platform.OS === 'ios' ? 20 : (StatusBar.currentHeight || 0) * 0.5,
+    paddingTop: Platform.OS === 'ios' ? 30 : (StatusBar.currentHeight || 0) * 0.75,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 2,
     elevation: 3,
     zIndex: 10,
-    height: Platform.OS === 'ios' ? 70 : (StatusBar.currentHeight || 0) + 50,
+    height: Platform.OS === 'ios' ? 105 : (StatusBar.currentHeight || 0) + 75,
   },
   content: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    height: 50,
-    maxHeight: 50,
+    paddingVertical: spacing.sm,
+    height: 75,
+    maxHeight: 75,
   },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
     flexShrink: 1,
-    maxHeight: 50,
+    maxHeight: 75,
   },
   logo: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    maxWidth: 32,
-    maxHeight: 32,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    maxWidth: 48,
+    maxHeight: 48,
   },
   appName: {
     color: '#FFFFFF',
-    fontSize: typography.sizes.md,
+    fontSize: typography.sizes.lg,
     fontWeight: 'bold',
     marginLeft: spacing.sm,
   },
   title: {
     color: '#FFFFFF',
-    fontSize: typography.sizes.md,
+    fontSize: typography.sizes.lg,
     fontWeight: 'bold',
     marginLeft: spacing.sm,
     flexShrink: 1,
@@ -164,19 +168,19 @@ const styles = StyleSheet.create({
   },
   userName: {
     color: '#FFFFFF',
-    fontSize: typography.sizes.sm,
+    fontSize: typography.sizes.md,
     marginRight: spacing.sm,
   },
   profileButton: {
-    padding: 4,
+    padding: 8,
   },
   backButton: {
-    padding: 4,
+    padding: 8,
   },
   rightComponentContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     flexShrink: 0,
-    maxHeight: 50,
+    maxHeight: 75,
   },
 }); 

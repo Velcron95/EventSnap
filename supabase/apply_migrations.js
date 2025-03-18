@@ -20,7 +20,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const migrations = [
   '20250316190546_add_get_user_display_name_function.sql',
   '20250317010000_add_display_name_update_trigger.sql',
-  '20250317020000_refresh_all_display_names.sql'
+  '20250317020000_refresh_all_display_names.sql',
+  '20250318000000_add_terms_privacy_acceptance.sql'
 ];
 
 async function applyMigrations() {

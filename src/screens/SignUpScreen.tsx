@@ -6,12 +6,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
+  ScrollView,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types';
-import { supabase } from '../lib/supabase';
+import { Linking } from 'react-native';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { CustomAlert } from '../components/CustomAlert';
+import { useCustomAlert } from '../hooks/useCustomAlert';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SignUp'>;
 
@@ -21,16 +24,36 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [privacyPolicyAccepted, setPrivacyPolicyAccepted] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const { signUp } = useAuth();
+  const { alertProps, showAlert } = useCustomAlert();
 
   const handleSignUp = async () => {
     if (!email || !password || !confirmPassword || !displayName) {
-      Alert.alert('Error', 'Please fill in all fields');
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: 'Please fill in all fields'
+      });
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: 'Passwords do not match'
+      });
+      return;
+    }
+
+    if (!privacyPolicyAccepted || !termsAccepted) {
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: 'You must accept the Privacy Policy and Terms of Service to create an account'
+      });
       return;
     }
 
@@ -38,106 +61,217 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
     
     try {
       // Sign up with email confirmation
-      const { error: signUpError } = await signUp(email, password, displayName);
+      const { error: signUpError } = await signUp(
+        email, 
+        password, 
+        displayName, 
+        privacyPolicyAccepted, 
+        termsAccepted
+      );
       
       if (signUpError) {
+        // Check if this is a profile creation error but account was created
+        if (signUpError.message.includes('profile') && signUpError.message.includes('error')) {
+          showAlert({
+            type: 'warning',
+            title: 'Account Created with Warning',
+            message: 'Your account has been created, but there was an issue with your profile. You will receive a confirmation email. Please check your email (including spam folder) to verify your account.'
+          });
+        }
         // Check if this is the email confirmation message
-        if (signUpError.message.includes('check your email for a confirmation link')) {
-          Alert.alert(
-            'Email Verification Required',
-            'Your account has been created! Please check your email for a verification link. You will need to verify your email before you can sign in.',
-            [
-              {
-                text: 'OK',
-                onPress: () => navigation.navigate('SignIn')
-              }
-            ]
-          );
+        else if (signUpError.message.includes('check your email for a confirmation link')) {
+          showAlert({
+            type: 'success',
+            title: 'Email Verification Required',
+            message: 'Your account has been created! Please check your email for a verification link. If you do not receive an email within a few minutes, check your spam folder or try a different email address.',
+            confirmText: 'OK',
+            cancelText: 'I didn\'t get the email',
+            onCancel: () => {
+              // For testing/development - in production you'd want a proper solution
+              showAlert({
+                type: 'info',
+                title: 'Email Troubleshooting',
+                message: 'If you didn\'t receive the email:\n\n1. Check your spam folder\n2. Try a different email address\n3. Contact support at codenova.studios@gmail.com'
+              });
+            }
+          });
         } else {
-          Alert.alert('Error', signUpError.message);
+          showAlert({
+            type: 'error',
+            title: 'Error',
+            message: signUpError.message
+          });
         }
       } else {
         // This would only happen if email was already confirmed
-        Alert.alert(
-          'Account Created',
-          'Your account has been created successfully. You can now sign in.',
-          [
-            {
-              text: 'OK',
-              onPress: () => navigation.navigate('SignIn')
-            }
-          ]
-        );
+        showAlert({
+          type: 'success',
+          title: 'Account Created',
+          message: 'Your account has been created successfully. You can now sign in.'
+        });
       }
     } catch (error) {
-      console.error('Sign up error:', error);
-      Alert.alert('Error', 'An unexpected error occurred');
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: 'An unexpected error occurred'
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create Account</Text>
+  const openUrl = async (url: string, errorMsg = 'Could not open URL') => {
+    try {
+      // First check if the URL can be opened
+      const supported = await Linking.canOpenURL(url);
       
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-      />
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        showAlert({
+          type: 'error',
+          title: 'Error',
+          message: `This device cannot open the URL: ${url}`
+        });
+      }
+    } catch (err) {
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: errorMsg
+      });
+    }
+  };
 
-      <TextInput
-        style={styles.input}
-        placeholder="Display Name"
-        value={displayName}
-        onChangeText={setDisplayName}
-      />
+  const openPrivacyPolicy = () => {
+    openUrl('https://codenova-eventsnap.vercel.app/privacy', 'Could not open Privacy Policy');
+  };
 
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
+  const openTermsOfService = () => {
+    openUrl('https://codenova-eventsnap.vercel.app/terms', 'Could not open Terms of Service');
+  };
 
-      <TextInput
-        style={styles.input}
-        placeholder="Confirm Password"
-        value={confirmPassword}
-        onChangeText={setConfirmPassword}
-        secureTextEntry
-      />
+  return (
+    <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <View style={styles.container}>
+        <Text style={styles.title}>Create Account</Text>
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          keyboardType="email-address"
+        />
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={handleSignUp}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Sign Up</Text>
-        )}
-      </TouchableOpacity>
+        <TextInput
+          style={styles.input}
+          placeholder="Display Name"
+          value={displayName}
+          onChangeText={setDisplayName}
+        />
 
-      <TouchableOpacity
-        style={styles.linkButton}
-        onPress={() => navigation.navigate('SignIn')}
-      >
-        <Text style={styles.linkText}>
-          Already have an account? Sign In
-        </Text>
-      </TouchableOpacity>
-    </View>
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Confirm Password"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+        />
+
+        <View style={styles.checkboxContainer}>
+          <TouchableOpacity 
+            style={styles.checkbox}
+            onPress={() => setPrivacyPolicyAccepted(!privacyPolicyAccepted)}
+          >
+            <View style={[
+              styles.checkboxBox, 
+              privacyPolicyAccepted && styles.checkboxChecked
+            ]}>
+              {privacyPolicyAccepted && (
+                <MaterialIcons name="check" size={16} color="#fff" />
+              )}
+            </View>
+            <View style={styles.checkboxTextContainer}>
+              <Text style={styles.checkboxText}>
+                I have read and accept the{' '}
+                <Text style={styles.link} onPress={openPrivacyPolicy}>
+                  Privacy Policy
+                </Text>
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.checkboxContainer}>
+          <TouchableOpacity 
+            style={styles.checkbox}
+            onPress={() => setTermsAccepted(!termsAccepted)}
+          >
+            <View style={[
+              styles.checkboxBox, 
+              termsAccepted && styles.checkboxChecked
+            ]}>
+              {termsAccepted && (
+                <MaterialIcons name="check" size={16} color="#fff" />
+              )}
+            </View>
+            <View style={styles.checkboxTextContainer}>
+              <Text style={styles.checkboxText}>
+                I have read and accept the{' '}
+                <Text style={styles.link} onPress={openTermsOfService}>
+                  Terms of Service
+                </Text>
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.button, 
+            (!email || !password || !confirmPassword || !displayName || !privacyPolicyAccepted || !termsAccepted) && 
+            styles.buttonDisabled
+          ]}
+          onPress={handleSignUp}
+          disabled={loading || !email || !password || !confirmPassword || !displayName || !privacyPolicyAccepted || !termsAccepted}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Sign Up</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.linkButton}
+          onPress={() => navigation.navigate('SignIn')}
+        >
+          <Text style={styles.linkText}>
+            Already have an account? Sign In
+          </Text>
+        </TouchableOpacity>
+
+        <CustomAlert {...alertProps} />
+      </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
+  scrollContainer: {
+    flexGrow: 1,
+  },
   container: {
     flex: 1,
     padding: 20,
@@ -159,12 +293,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     fontSize: 16,
   },
+  checkboxContainer: {
+    marginBottom: 15,
+  },
+  checkbox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  checkboxBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#007AFF',
+  },
+  checkboxTextContainer: {
+    flex: 1,
+  },
+  checkboxText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#444',
+  },
+  link: {
+    color: '#007AFF',
+    textDecorationLine: 'underline',
+  },
   button: {
     backgroundColor: '#007AFF',
     height: 50,
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 10,
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
   },
   buttonText: {
     color: '#fff',

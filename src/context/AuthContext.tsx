@@ -7,7 +7,7 @@ import { Alert } from 'react-native';
 type AuthContextType = {
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, displayName: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, displayName: string, privacyPolicyAccepted: boolean, termsAccepted: boolean) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string, rememberMe: boolean) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 };
@@ -24,28 +24,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         // Add a timeout to ensure we don't get stuck on the loading screen
         const timeoutId = setTimeout(() => {
-          console.log('Session check timed out, setting loading to false');
           setLoading(false);
         }, 5000); // 5 second timeout
 
         const rememberMe = await AsyncStorage.getItem('rememberMe');
-        console.log('Remember me flag:', rememberMe);
         
         // If rememberMe is not set, sign out
         if (rememberMe !== 'true') {
           await supabase.auth.signOut();
-          console.log('No remember me flag, signing out');
         }
         
         // Check current session
         const { data } = await supabase.auth.getSession();
-        console.log('Session after check:', data.session?.user?.email || 'No session');
         
         // If we have a session, ensure profile exists
         if (data.session?.user) {
           await createProfileIfNeeded(
             data.session.user.id, 
-            data.session.user.user_metadata?.display_name || ''
+            data.session.user.user_metadata?.display_name || '',
+            data.session.user.user_metadata?.privacy_policy_accepted === true,
+            data.session.user.user_metadata?.terms_of_service_accepted === true
           );
         }
         
@@ -53,7 +51,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(false);
         clearTimeout(timeoutId); // Clear the timeout if everything completes successfully
       } catch (error) {
-        console.error('Error checking session:', error);
         setLoading(false);
       }
     };
@@ -62,14 +59,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, session?.user?.email);
       setSession(session);
       
       // Create profile on sign in or token refresh
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
         await createProfileIfNeeded(
           session.user.id, 
-          session.user.user_metadata?.display_name || ''
+          session.user.user_metadata?.display_name || '',
+          session.user.user_metadata?.privacy_policy_accepted === true,
+          session.user.user_metadata?.terms_of_service_accepted === true
         );
       }
     });
@@ -77,27 +75,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const createProfileIfNeeded = async (userId: string, displayName: string) => {
+  const createProfileIfNeeded = async (userId: string, displayName: string, privacyPolicyAccepted = false, termsAccepted = false) => {
     try {
-      console.log('Checking if profile exists for user:', userId);
-      
       if (!userId) {
-        console.error('Cannot create profile: userId is undefined or null');
         return;
       }
       
       // Check if profile exists
       const { data: existingProfile, error: checkError } = await supabase
         .from('user')
-        .select('id, display_name, email')
+        .select('id, display_name, email, privacy_policy_accepted, terms_of_service_accepted')
         .eq('id', userId)
         .single();
 
       if (checkError) {
         if (checkError.code === 'PGRST116') {
-          console.log('No profile found, will create one');
-        } else {
-          console.error('Error checking for existing profile:', checkError);
           // Continue anyway to try creating the profile
         }
       }
@@ -106,12 +98,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!existingProfile) {
         const userEmail = session?.user?.email || '';
         const userDisplayName = displayName || session?.user?.user_metadata?.display_name || 'User';
-        
-        console.log('Creating new user profile:', {
-          id: userId,
-          display_name: userDisplayName,
-          email: userEmail
-        });
+        const currentTimestamp = new Date().toISOString();
         
         // First try to insert with returning
         const { data: newProfile, error: insertError } = await supabase
@@ -120,13 +107,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: userId,
             display_name: userDisplayName,
             email: userEmail,
+            privacy_policy_accepted: privacyPolicyAccepted,
+            terms_of_service_accepted: termsAccepted,
+            acceptance_timestamp: privacyPolicyAccepted && termsAccepted ? currentTimestamp : null
           })
           .select()
           .single();
 
         if (insertError) {
-          console.error('Error creating user profile with select:', insertError);
-          
           // Try again without select in case that's causing issues
           const { error: simpleInsertError } = await supabase
             .from('user')
@@ -134,28 +122,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               id: userId,
               display_name: userDisplayName,
               email: userEmail,
+              privacy_policy_accepted: privacyPolicyAccepted,
+              terms_of_service_accepted: termsAccepted,
+              acceptance_timestamp: privacyPolicyAccepted && termsAccepted ? currentTimestamp : null
             });
             
           if (simpleInsertError) {
-            console.error('Error creating user profile (simple insert):', simpleInsertError);
             Alert.alert('Profile Creation Error', 'Could not create user profile. Please try signing out and back in.');
-          } else {
-            console.log('Successfully created user profile (simple insert)');
           }
-        } else {
-          console.log('Successfully created user profile:', newProfile);
         }
       } else {
-        console.log('User profile already exists:', existingProfile);
+        // Update terms and privacy policy acceptance if needed
+        if ((privacyPolicyAccepted && !existingProfile.privacy_policy_accepted) || 
+            (termsAccepted && !existingProfile.terms_of_service_accepted)) {
+          
+          const updates = {
+            privacy_policy_accepted: privacyPolicyAccepted || existingProfile.privacy_policy_accepted,
+            terms_of_service_accepted: termsAccepted || existingProfile.terms_of_service_accepted,
+          };
+          
+          // Add timestamp if both are now accepted
+          if (updates.privacy_policy_accepted && updates.terms_of_service_accepted) {
+            const currentTimestamp = new Date().toISOString();
+            Object.assign(updates, { acceptance_timestamp: currentTimestamp });
+          }
+          
+          const { error: updateError } = await supabase
+            .from('user')
+            .update(updates)
+            .eq('id', userId);
+        }
       }
     } catch (error) {
-      console.error('Unexpected error in createProfileIfNeeded:', error);
     }
   };
 
-  const signUp = async (email: string, password: string, displayName: string) => {
+  const signUp = async (email: string, password: string, displayName: string, privacyPolicyAccepted: boolean, termsAccepted: boolean) => {
     try {
-      console.log('Signing up with email:', email);
+      // Verify that terms and privacy policy are accepted
+      if (!privacyPolicyAccepted || !termsAccepted) {
+        return { 
+          error: new Error('You must accept both the Privacy Policy and Terms of Service to create an account.') 
+        };
+      }
       
       // Sign up with email confirmation
       const { error, data } = await supabase.auth.signUp({
@@ -164,6 +173,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         options: {
           data: {
             display_name: displayName,
+            privacy_policy_accepted: privacyPolicyAccepted,
+            terms_of_service_accepted: termsAccepted,
           },
           // Enable email confirmation
           emailRedirectTo: 'eventsnap://auth/callback',
@@ -171,12 +182,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (error) {
-        console.error('Sign up error:', error);
         return { error };
       } 
       
-      console.log('Sign up successful, user:', data?.user?.id);
-      console.log('Email confirmation status:', data?.user?.identities?.[0]?.identity_data?.email_confirmed_at ? 'confirmed' : 'pending');
+      // Store the acceptance data in the user profile
+      if (data?.user?.id) {
+        await createProfileIfNeeded(data.user.id, displayName, privacyPolicyAccepted, termsAccepted);
+      }
       
       // Don't auto sign-in or create profile - wait for email confirmation
       return { 
@@ -185,14 +197,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           new Error('Please check your email for a confirmation link before logging in. If you do not receive an email, you may need to check your spam folder.')
       };
     } catch (error) {
-      console.error('Unexpected error in signUp:', error);
       return { error: error as Error };
     }
   };
 
   const signIn = async (email: string, password: string, rememberMe: boolean) => {
     try {
-      console.log('Signing in with email:', email, 'Remember me:', rememberMe);
       if (rememberMe) {
         await AsyncStorage.setItem('rememberMe', 'true');
       } else {
@@ -204,27 +214,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         password,
       });
 
-      if (error) {
-        console.error('Sign in error:', error);
-      } else {
-        console.log('Sign in successful');
-      }
-
       return { error };
     } catch (error) {
-      console.error('Unexpected error in signIn:', error);
       return { error: error as Error };
     }
   };
 
   const signOut = async () => {
     try {
-      console.log('Signing out');
       await AsyncStorage.removeItem('rememberMe');
       await supabase.auth.signOut();
-      console.log('Sign out successful');
     } catch (error) {
-      console.error('Error signing out:', error);
     }
   };
 

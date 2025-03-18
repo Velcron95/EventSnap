@@ -1,7 +1,5 @@
-console.log('App.tsx loaded - TEST LOG');
-
-import React, { useState, useEffect } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useState, useEffect, useRef } from 'react';
+import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -16,11 +14,14 @@ import { CreateEventScreen } from './src/screens/CreateEventScreen';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { EventProvider } from './src/context/EventContext';
 import { TabParamList, RootStackParamList, EventTabParamList } from './types';
-import { View, Image, Text, TouchableOpacity, BackHandler } from 'react-native';
+import { View, Image, Text, TouchableOpacity, BackHandler, Linking, StatusBar } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { ParticipantsScreen } from './src/screens/ParticipantsScreen';
 import { ProfileSettingsScreen } from './src/screens/ProfileSettingsScreen';
 import { HeaderBar } from './src/components/HeaderBar';
+import { GlobalAlert } from './src/components/GlobalAlert';
+import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
+import { supabase } from './src/lib/supabase';
 
 const EventTab = createBottomTabNavigator<EventTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -28,7 +29,6 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 // Event tab navigator - contains Camera, Gallery, and Participants screens for a specific event
 const EventTabNavigator = ({ route, navigation }: any) => {
   const { eventName, eventId } = route.params;
-  console.log('EventTabNavigator params:', { eventName, eventId });
   
   // Add a back handler to navigate to Events screen when back button is pressed
   React.useEffect(() => {
@@ -43,7 +43,6 @@ const EventTabNavigator = ({ route, navigation }: any) => {
 
     // Add hardware back button handler for Android
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      console.log('Hardware back button pressed in EventTabNavigator');
       // Navigate to Events screen
       navigation.navigate('Events');
       return true; // Prevent default behavior
@@ -111,7 +110,25 @@ const EventTabNavigator = ({ route, navigation }: any) => {
   );
 };
 
-const NavigationContent = () => {
+const App = () => {
+  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  
+  return (
+    <SafeAreaProvider>
+      <StatusBar hidden={true} />
+      <AuthProvider>
+        <EventProvider>
+          <NavigationContainer ref={navigationRef}>
+            <NavigationContent navigationRef={navigationRef} />
+          </NavigationContainer>
+          <GlobalAlert />
+        </EventProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
+  );
+};
+
+const NavigationContent = ({ navigationRef }: { navigationRef: React.RefObject<NavigationContainerRef<RootStackParamList>> }) => {
   const { session, loading } = useAuth();
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [forceRender, setForceRender] = useState(false);
@@ -120,13 +137,58 @@ const NavigationContent = () => {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       if (loading) {
-        console.log('Loading timeout reached, forcing re-render');
         setForceRender(true);
       }
     }, 8000); // 8 second timeout
 
     return () => clearTimeout(timeoutId);
   }, [loading]);
+
+  // Handle deep links
+  useEffect(() => {
+    // Function to handle URL
+    const handleDeepLink = async (url: string) => {
+      // Handle authentication links (email verification, password reset)
+      if (url.includes('auth/callback') || url.includes('auth/reset-callback')) {
+        try {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: url.split('access_token=')[1]?.split('&')[0] || '',
+            refresh_token: url.split('refresh_token=')[1]?.split('&')[0] || '',
+          });
+          
+          if (error) {
+            return;
+          }
+          
+          if (data.session) {
+            // Session will be handled by onAuthStateChange
+          }
+          
+          // If this is a password reset link, navigate to reset password screen
+          if (url.includes('auth/reset-callback') && navigationRef.current) {
+            navigationRef.current.navigate('ForgotPassword', { step: 'reset' } as never);
+          }
+        } catch (error) {
+        }
+      }
+    };
+
+    // Add event listener for deep links when the app is already open
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      handleDeepLink(url);
+    });
+
+    // Handle the case where the app is opened from a deep link
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        handleDeepLink(url);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [navigationRef]);
 
   if (loading && !forceRender) {
     return (
@@ -193,24 +255,11 @@ const NavigationContent = () => {
       ) : (
         <>
           <Stack.Screen name="SignIn" component={SignInScreen} />
+          <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
           <Stack.Screen name="SignUp" component={SignUpScreen} />
         </>
       )}
     </Stack.Navigator>
-  );
-};
-
-const App = () => {
-  return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <EventProvider>
-          <NavigationContainer>
-            <NavigationContent />
-          </NavigationContainer>
-        </EventProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
   );
 };
 

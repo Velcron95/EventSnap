@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Platform,
   ScrollView,
   Image,
+  Clipboard,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
@@ -23,13 +24,100 @@ import { HeaderBar } from '../components/HeaderBar';
 
 type CreateEventScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
+// Function to generate a random 8-character alphanumeric code
+const generateEventCode = (): string => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing characters like 0, O, 1, I
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+};
+
+// Function to check if an event code already exists in the database
+const isCodeUnique = async (code: string): Promise<boolean> => {
+  try {
+    const { data, error } = await supabase
+      .from('events')
+      .select('id')
+      .eq('event_code', code)
+      .limit(1);
+    
+    if (error) {
+      console.error('Error checking code uniqueness:', error);
+      throw error;
+    }
+    
+    // If no data or empty array, the code is unique
+    return !data || data.length === 0;
+  } catch (error) {
+    console.error('Error checking code uniqueness:', error);
+    // If there's an error, assume it's not unique to be safe
+    return false;
+  }
+};
+
+// Generate a unique event code (checks against database)
+const generateUniqueEventCode = async (): Promise<string> => {
+  let code = generateEventCode();
+  let isUnique = await isCodeUnique(code);
+  
+  // If code is not unique, keep generating until we find a unique one
+  // Limit attempts to prevent infinite loop in case of errors
+  let attempts = 0;
+  const maxAttempts = 10;
+  
+  while (!isUnique && attempts < maxAttempts) {
+    code = generateEventCode();
+    isUnique = await isCodeUnique(code);
+    attempts++;
+  }
+  
+  return code;
+};
+
 export const CreateEventScreen = () => {
   const [eventName, setEventName] = useState('');
-  const [eventPassword, setEventPassword] = useState('');
+  const [eventCode, setEventCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [generatingCode, setGeneratingCode] = useState(false);
   const navigation = useNavigation<CreateEventScreenNavigationProp>();
+
+  // Generate a unique event code when the component mounts
+  useEffect(() => {
+    const initializeCode = async () => {
+      setGeneratingCode(true);
+      try {
+        const uniqueCode = await generateUniqueEventCode();
+        setEventCode(uniqueCode);
+      } catch (error) {
+        console.error('Error generating unique code:', error);
+        // Fallback to a regular code if there's an error
+        setEventCode(generateEventCode());
+      } finally {
+        setGeneratingCode(false);
+      }
+    };
+    
+    initializeCode();
+  }, []);
+
+  // Function to regenerate the event code
+  const regenerateCode = async () => {
+    setGeneratingCode(true);
+    try {
+      const uniqueCode = await generateUniqueEventCode();
+      setEventCode(uniqueCode);
+    } catch (error) {
+      console.error('Error regenerating unique code:', error);
+      // Fallback to a regular code if there's an error
+      setEventCode(generateEventCode());
+    } finally {
+      setGeneratingCode(false);
+    }
+  };
 
   const pickImage = async () => {
     try {
@@ -161,8 +249,8 @@ export const CreateEventScreen = () => {
   };
 
   const handleCreateEvent = async () => {
-    if (!eventName || !eventPassword) {
-      Alert.alert('Error', 'Please fill in all required fields');
+    if (!eventName) {
+      Alert.alert('Error', 'Please enter an event name');
       return;
     }
 
@@ -197,13 +285,13 @@ export const CreateEventScreen = () => {
       
       console.log('User display name:', displayName);
 
-      // Create the event
+      // Create the event with the event code
       console.log('Creating event with name:', eventName);
       const { data: event, error: eventError } = await supabase
         .from('events')
         .insert({
           name: eventName,
-          password: eventPassword,
+          event_code: eventCode, // Use the event_code field
           created_by: user.id,
           creator_display_name: displayName
         })
@@ -306,24 +394,20 @@ export const CreateEventScreen = () => {
 
       console.log('Creator added as participant successfully');
 
-      Alert.alert(
-        'Success',
-        'Event created successfully!',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Just go back to the Events screen
-              navigation.goBack();
-            }
-          }
-        ]
-      );
+      // Just navigate back without alert
+      navigation.goBack();
     } catch (error) {
       console.error('Error creating event:', error);
       Alert.alert('Error', 'Failed to create event: ' + (error as any)?.message || 'Unknown error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Function to copy event code to clipboard
+  const copyCodeToClipboard = () => {
+    if (eventCode) {
+      Clipboard.setString(eventCode);
     }
   };
 
@@ -350,14 +434,37 @@ export const CreateEventScreen = () => {
             onChangeText={setEventName}
           />
           
-          <Text style={styles.label}>Event Password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Create a password for others to join"
-            value={eventPassword}
-            onChangeText={setEventPassword}
-            secureTextEntry
-          />
+          <Text style={styles.label}>Event Code (For others to join)</Text>
+          <View style={styles.codeContainer}>
+            {generatingCode ? (
+              <ActivityIndicator size="small" color="#007AFF" style={{ flex: 1 }} />
+            ) : (
+              <Text style={styles.eventCode}>{eventCode}</Text>
+            )}
+            <TouchableOpacity 
+              style={styles.codeActionButton}
+              onPress={regenerateCode}
+              disabled={generatingCode || loading || uploadingImage}
+            >
+              {generatingCode ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
+                  <Text style={styles.buttonSmallText}>New</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.codeActionButton}
+              onPress={copyCodeToClipboard}
+              disabled={generatingCode || !eventCode}
+            >
+              <MaterialIcons name="content-copy" size={20} color="#FFFFFF" />
+              <Text style={styles.buttonSmallText}>Copy</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.codeHelp}>Share this code with others to join your event</Text>
           
           <Text style={styles.label}>Background Image (Optional)</Text>
           <TouchableOpacity 
@@ -446,6 +553,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     fontSize: 16,
     backgroundColor: '#fff',
+  },
+  codeContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    height: 50,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    marginBottom: 10,
+    alignItems: 'center',
+    backgroundColor: '#f0f8ff',
+    paddingHorizontal: 15,
+  },
+  eventCode: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    letterSpacing: 1.5,
+  },
+  codeActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    marginLeft: 8,
+  },
+  buttonSmallText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  codeHelp: {
+    fontSize: 12,
+    color: '#666',
+    alignSelf: 'flex-start',
+    marginBottom: 20,
   },
   imagePickerContainer: {
     width: '100%',

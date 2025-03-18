@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share, BackHandler, Modal } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share, BackHandler, Modal, SafeAreaView } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
@@ -14,7 +14,6 @@ import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { colors, spacing } from '../styles/theme';
-import { HeaderBar } from '../components/HeaderBar';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { refreshCurrentUserDisplayName } from '../lib/displayNameUtils';
 import { RadioButton } from 'react-native-paper';
@@ -752,23 +751,20 @@ export const GalleryScreen = () => {
     }
   };
 
-  // Update the selectedMedia setter to also hide the header
+  // Show fullscreen image
   const showFullScreenImage = (item: MediaWithUser) => {
-    console.log('Showing full screen image:', {
-      userId: item.user_id,
-      displayName: item.user?.display_name,
-      isCreator: item.user_id === currentEvent?.created_by
-    });
-    
+    const index = media.findIndex(m => m.id === item.id);
+    setCurrentIndex(index >= 0 ? index : 0);
     setSelectedMedia(item);
     setFullScreenVisible(true);
-    setHeaderVisible(false);
+    setHeaderVisible(false); // Hide header when showing fullscreen
   };
-  
-  // Update the close function to show the header again
+
+  // Close fullscreen image
   const closeFullScreenImage = () => {
+    setFullScreenVisible(false);
     setSelectedMedia(null);
-    setHeaderVisible(true);
+    setHeaderVisible(true); // Show header when closing fullscreen
   };
 
   // Add this function to show a user-friendly alert about the missing table
@@ -1317,15 +1313,12 @@ export const GalleryScreen = () => {
               style={styles.backButtonContainer}
               onPress={handleBackPress}
             >
-              <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
+              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
             </TouchableOpacity>
             
             <View style={styles.titleContainer}>
-              <Text style={styles.headerTitleMain} numberOfLines={1}>
-                {eventName || 'Gallery'}
-              </Text>
               <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${media.length} ${media.length === 1 ? "photo" : "photos"}`}
+                {`${media.length} ${Number(media.length) === 1 ? "photo" : "photos"}`}
                 {selectionMode && ` • ${selectedItems.length} selected`}
               </Text>
             </View>
@@ -1333,35 +1326,35 @@ export const GalleryScreen = () => {
             <View style={styles.headerActionsContainer}>
               {/* Filter button */}
               <TouchableOpacity
-                style={styles.headerActionButton}
+                style={styles.actionButton}
                 onPress={toggleFilterModal}
               >
-                <MaterialIcons name="filter-list" size={20} color="#FFFFFF" />
+                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
               </TouchableOpacity>
               
               {/* Refresh button */}
               <TouchableOpacity
-                style={styles.headerActionButton}
+                style={styles.actionButton}
                 onPress={async () => {
                   console.log('Manual refresh requested');
                   await refreshCurrentUserDisplayName();
                   fetchEventMedia();
                 }}
               >
-                <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
+                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
               </TouchableOpacity>
               
               {/* Download all button */}
               {!selectionMode && media.length > 0 && (
                 <TouchableOpacity
-                  style={styles.headerActionButton}
+                  style={styles.actionButton}
                   onPress={handleDownloadAllPhotos}
                   disabled={downloadingAll}
                 >
                   {downloadingAll ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <MaterialIcons name="file-download" size={20} color="#FFFFFF" />
+                    <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
                   )}
                 </TouchableOpacity>
               )}
@@ -1370,14 +1363,14 @@ export const GalleryScreen = () => {
               {selectionMode ? (
                 <>
                   <TouchableOpacity
-                    style={styles.headerActionButton}
+                    style={styles.actionButton}
                     onPress={toggleSelectionMode}
                   >
-                    <MaterialIcons name="close" size={20} color="#FFFFFF" />
+                    <MaterialIcons name="close" size={24} color="#FFFFFF" />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
-                      styles.headerActionButton, 
+                      styles.actionButton, 
                       styles.deleteButton,
                       selectedItems.length === 0 && styles.disabledButton
                     ]}
@@ -1387,16 +1380,16 @@ export const GalleryScreen = () => {
                     {multiDeleteInProgress ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <MaterialIcons name="delete" size={20} color="#FFFFFF" />
+                      <MaterialIcons name="delete" size={24} color="#FFFFFF" />
                     )}
                   </TouchableOpacity>
                 </>
               ) : (
                 <TouchableOpacity
-                  style={styles.headerActionButton}
+                  style={styles.actionButton}
                   onPress={toggleSelectionMode}
                 >
-                  <MaterialIcons name="select-all" size={20} color="#FFFFFF" />
+                  <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
               )}
             </View>
@@ -1417,15 +1410,12 @@ export const GalleryScreen = () => {
               style={styles.backButtonContainer}
               onPress={handleBackPress}
             >
-              <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
+              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
             </TouchableOpacity>
             
             <View style={styles.titleContainer}>
-              <Text style={styles.headerTitleMain} numberOfLines={1}>
-                {eventName || 'Gallery'}
-              </Text>
               <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${media.length} ${media.length === 1 ? "photo" : "photos"}`}
+                {`${media.length} ${Number(media.length) === 1 ? "photo" : "photos"}`}
                 {selectionMode && ` • ${selectedItems.length} selected`}
               </Text>
             </View>
@@ -1433,35 +1423,35 @@ export const GalleryScreen = () => {
             <View style={styles.headerActionsContainer}>
               {/* Filter button */}
               <TouchableOpacity
-                style={styles.headerActionButton}
+                style={styles.actionButton}
                 onPress={toggleFilterModal}
               >
-                <MaterialIcons name="filter-list" size={20} color="#FFFFFF" />
+                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
               </TouchableOpacity>
               
               {/* Refresh button */}
               <TouchableOpacity
-                style={styles.headerActionButton}
+                style={styles.actionButton}
                 onPress={async () => {
                   console.log('Manual refresh requested');
                   await refreshCurrentUserDisplayName();
                   fetchEventMedia();
                 }}
               >
-                <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
+                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
               </TouchableOpacity>
               
               {/* Download all button */}
               {!selectionMode && media.length > 0 && (
                 <TouchableOpacity
-                  style={styles.headerActionButton}
+                  style={styles.actionButton}
                   onPress={handleDownloadAllPhotos}
                   disabled={downloadingAll}
                 >
                   {downloadingAll ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <MaterialIcons name="file-download" size={20} color="#FFFFFF" />
+                    <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
                   )}
                 </TouchableOpacity>
               )}
@@ -1470,14 +1460,14 @@ export const GalleryScreen = () => {
               {selectionMode ? (
                 <>
                   <TouchableOpacity
-                    style={styles.headerActionButton}
+                    style={styles.actionButton}
                     onPress={toggleSelectionMode}
                   >
-                    <MaterialIcons name="close" size={20} color="#FFFFFF" />
+                    <MaterialIcons name="close" size={24} color="#FFFFFF" />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
-                      styles.headerActionButton, 
+                      styles.actionButton, 
                       styles.deleteButton,
                       selectedItems.length === 0 && styles.disabledButton
                     ]}
@@ -1487,16 +1477,16 @@ export const GalleryScreen = () => {
                     {multiDeleteInProgress ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
-                      <MaterialIcons name="delete" size={20} color="#FFFFFF" />
+                      <MaterialIcons name="delete" size={24} color="#FFFFFF" />
                     )}
                   </TouchableOpacity>
                 </>
               ) : (
                 <TouchableOpacity
-                  style={styles.headerActionButton}
+                  style={styles.actionButton}
                   onPress={toggleSelectionMode}
                 >
-                  <MaterialIcons name="select-all" size={20} color="#FFFFFF" />
+                  <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
               )}
             </View>
@@ -1525,25 +1515,22 @@ export const GalleryScreen = () => {
               style={styles.backButtonContainer}
               onPress={handleBackPress}
             >
-              <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
+              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
             </TouchableOpacity>
             
             <View style={styles.titleContainer}>
-              <Text style={styles.headerTitleMain} numberOfLines={1}>
-                {eventName || 'Gallery'}
-              </Text>
               <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${media.length} ${media.length === 1 ? "photo" : "photos"}`}
+                {`${media.length} ${Number(media.length) === 1 ? "photo" : "photos"}`}
               </Text>
             </View>
             
             <View style={styles.headerActionsContainer}>
               {/* Filter button */}
               <TouchableOpacity
-                style={styles.headerActionButton}
+                style={styles.actionButton}
                 onPress={toggleFilterModal}
               >
-                <MaterialIcons name="filter-list" size={20} color="#FFFFFF" />
+                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
@@ -1569,152 +1556,151 @@ export const GalleryScreen = () => {
   console.log('Render state - selectionMode:', selectionMode, 'isCreator:', isCreator);
 
   return (
-    <View style={styles.container}>
-      {/* Modern header with gradient background */}
-      <View style={styles.modernHeader}>
-        <View style={styles.headerContent}>
-          <TouchableOpacity 
-            style={styles.backButtonContainer}
-            onPress={handleBackPress}
-          >
-            <MaterialIcons name="arrow-back" size={22} color="#FFFFFF" />
-          </TouchableOpacity>
-          
-          <View style={styles.titleContainer}>
-            <Text style={styles.headerTitleMain} numberOfLines={1}>
-              {eventName || 'Gallery'}
-            </Text>
-            <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {`${media.length} ${media.length === 1 ? "photo" : "photos"}`}
-              {selectionMode && ` • ${selectedItems.length} selected`}
-            </Text>
-          </View>
-          
-          <View style={styles.headerActionsContainer}>
-            {/* Filter button */}
-            <TouchableOpacity
-              style={styles.headerActionButton}
-              onPress={toggleFilterModal}
+    <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
+        {/* Modern header with gradient background */}
+        <View style={styles.modernHeader}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity 
+              style={styles.backButtonContainer}
+              onPress={handleBackPress}
             >
-              <MaterialIcons name="filter-list" size={20} color="#FFFFFF" />
+              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
             </TouchableOpacity>
             
-            {/* Refresh button */}
-            <TouchableOpacity
-              style={styles.headerActionButton}
-              onPress={async () => {
-                console.log('Manual refresh requested');
-                await refreshCurrentUserDisplayName();
-                fetchEventMedia();
-              }}
-            >
-              <MaterialIcons name="refresh" size={20} color="#FFFFFF" />
-            </TouchableOpacity>
+            <View style={styles.titleContainer}>
+              <Text style={styles.headerSubtitle} numberOfLines={1}>
+                {`${media.length} ${Number(media.length) === 1 ? "photo" : "photos"}`}
+                {selectionMode && ` • ${selectedItems.length} selected`}
+              </Text>
+            </View>
             
-            {/* Download all button */}
-            {!selectionMode && media.length > 0 && (
+            <View style={styles.headerActionsContainer}>
+              {/* Filter button */}
               <TouchableOpacity
-                style={styles.headerActionButton}
-                onPress={handleDownloadAllPhotos}
-                disabled={downloadingAll}
+                style={styles.actionButton}
+                onPress={toggleFilterModal}
               >
-                {downloadingAll ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <MaterialIcons name="file-download" size={20} color="#FFFFFF" />
-                )}
+                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
               </TouchableOpacity>
-            )}
-            
-            {/* Selection mode buttons */}
-            {selectionMode ? (
-              <>
+              
+              {/* Refresh button */}
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={async () => {
+                  console.log('Manual refresh requested');
+                  await refreshCurrentUserDisplayName();
+                  fetchEventMedia();
+                }}
+              >
+                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+              
+              {/* Download all button */}
+              {!selectionMode && media.length > 0 && (
                 <TouchableOpacity
-                  style={styles.headerActionButton}
-                  onPress={toggleSelectionMode}
+                  style={styles.actionButton}
+                  onPress={handleDownloadAllPhotos}
+                  disabled={downloadingAll}
                 >
-                  <MaterialIcons name="close" size={20} color="#FFFFFF" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.headerActionButton, 
-                    styles.deleteButton,
-                    selectedItems.length === 0 && styles.disabledButton
-                  ]}
-                  onPress={deleteSelectedItems}
-                  disabled={selectedItems.length === 0 || multiDeleteInProgress}
-                >
-                  {multiDeleteInProgress ? (
+                  {downloadingAll ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <MaterialIcons name="delete" size={20} color="#FFFFFF" />
+                    <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
                   )}
                 </TouchableOpacity>
-              </>
-            ) : (
-              <TouchableOpacity
-                style={styles.headerActionButton}
-                onPress={toggleSelectionMode}
-              >
-                <MaterialIcons name="select-all" size={20} color="#FFFFFF" />
-              </TouchableOpacity>
-            )}
+              )}
+              
+              {/* Selection mode buttons */}
+              {selectionMode ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={toggleSelectionMode}
+                  >
+                    <MaterialIcons name="close" size={24} color="#FFFFFF" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.actionButton, 
+                      styles.deleteButton,
+                      selectedItems.length === 0 && styles.disabledButton
+                    ]}
+                    onPress={deleteSelectedItems}
+                    disabled={selectedItems.length === 0 || multiDeleteInProgress}
+                  >
+                    {multiDeleteInProgress ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <MaterialIcons name="delete" size={24} color="#FFFFFF" />
+                    )}
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={toggleSelectionMode}
+                >
+                  <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
+        
+        {selectedMedia ? (
+          renderFullScreenImage()
+        ) : (
+          <>
+            {loading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={styles.loadingText}>Loading media...</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>{error}</Text>
+                <TouchableOpacity 
+                  style={styles.retryButton}
+                  onPress={fetchEventMedia}
+                >
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : media.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <MaterialIcons name="photo-library" size={64} color="#CCCCCC" />
+                <Text style={styles.emptyText}>No photos or videos yet</Text>
+                <Text style={styles.emptySubtext}>Take some photos to see them here!</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={filteredMedia}
+                renderItem={renderMediaItem}
+                keyExtractor={(item) => item.id}
+                numColumns={numColumns}
+                contentContainerStyle={styles.mediaGrid}
+                refreshing={loading}
+                onRefresh={fetchEventMedia}
+                showsVerticalScrollIndicator={false}
+                initialNumToRender={12}
+                maxToRenderPerBatch={12}
+                windowSize={5}
+                removeClippedSubviews={true}
+                ListFooterComponent={<View style={{ height: 20 }} />}
+              />
+            )}
+          </>
+        )}
+        {downloadingAll && (
+          <LoadingOverlay isVisible={true} message="Downloading all photos..." />
+        )}
+        {multiDeleteInProgress && (
+          <LoadingOverlay isVisible={true} message="Deleting selected items..." />
+        )}
+        {renderFilterModal()}
       </View>
-      
-      {selectedMedia ? (
-        renderFullScreenImage()
-      ) : (
-        <>
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={styles.loadingText}>Loading media...</Text>
-            </View>
-          ) : error ? (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-              <TouchableOpacity 
-                style={styles.retryButton}
-                onPress={fetchEventMedia}
-              >
-                <Text style={styles.retryText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : media.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <MaterialIcons name="photo-library" size={64} color="#CCCCCC" />
-              <Text style={styles.emptyText}>No photos or videos yet</Text>
-              <Text style={styles.emptySubtext}>Take some photos to see them here!</Text>
-            </View>
-          ) : (
-            <FlatList
-              data={filteredMedia}
-              renderItem={renderMediaItem}
-              keyExtractor={(item) => item.id}
-              numColumns={numColumns}
-              contentContainerStyle={styles.mediaGrid}
-              refreshing={loading}
-              onRefresh={fetchEventMedia}
-              showsVerticalScrollIndicator={false}
-              initialNumToRender={12}
-              maxToRenderPerBatch={12}
-              windowSize={5}
-              removeClippedSubviews={true}
-              ListFooterComponent={<View style={{ height: 20 }} />}
-            />
-          )}
-        </>
-      )}
-      {downloadingAll && (
-        <LoadingOverlay isVisible={true} message="Downloading all photos..." />
-      )}
-      {multiDeleteInProgress && (
-        <LoadingOverlay isVisible={true} message="Deleting selected items..." />
-      )}
-      {renderFilterModal()}
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -1876,13 +1862,13 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   actionButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
+    marginLeft: 12,
   },
   fullScreenContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -2119,17 +2105,17 @@ const styles = StyleSheet.create({
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
   backButtonContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 12,
   },
   headerTitleMain: {
     color: '#fff',
@@ -2143,9 +2129,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-    fontWeight: '500',
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   selectionCount: {
     color: '#fff',
@@ -2158,6 +2144,15 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     backgroundColor: 'rgba(255,59,48,0.8)',
+    padding: 10,
+    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    marginLeft: 4,
   },
   disabledButton: {
     opacity: 0.5,
@@ -2166,6 +2161,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   filterModal: {
     backgroundColor: '#fff',
@@ -2204,6 +2200,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 4,
     alignItems: 'center',
+    marginTop: 20,
   },
   applyFilterButtonText: {
     color: '#fff',
@@ -2213,4 +2210,62 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   },
+  selectionBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: colors.primary,
+  },
+  selectionText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginRight: 10,
+  },
+  header: {
+    backgroundColor: colors.primary,
+    paddingTop: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  mediaList: {
+    paddingBottom: 16,
+  },
+  likeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  deleteOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  deleteOverlayText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  downloadOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  downloadOverlayText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 16,
+  }
 }); 

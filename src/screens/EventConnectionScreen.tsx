@@ -33,14 +33,14 @@ export const EventConnectionScreen: React.FC = () => {
   const navigation = useNavigation<EventConnectionScreenNavigationProp>();
   const { setCurrentEvent } = useEvent();
   const [eventName, setEventName] = useState('');
-  const [eventPassword, setEventPassword] = useState('');
+  const [eventCode, setEventCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   
-  // For password modal - keeping this for potential future use
-  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  // For code modal - keeping this for potential future use
+  const [codeModalVisible, setCodeModalVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
-  const [passwordInput, setPasswordInput] = useState('');
+  const [codeInput, setCodeInput] = useState('');
 
   const handleJoinSuccess = (event: any) => {
     // Set the current event in context
@@ -65,11 +65,11 @@ export const EventConnectionScreen: React.FC = () => {
     );
   };
 
-  const handleJoinEvent = async (selectedEventName?: string, selectedEventPassword?: string) => {
+  const handleJoinEvent = async (selectedEventName?: string, selectedEventCode?: string) => {
     const nameToUse = selectedEventName || eventName;
-    const passwordToUse = selectedEventPassword || eventPassword;
+    const codeToUse = selectedEventCode || eventCode;
     
-    if (!nameToUse || !passwordToUse) {
+    if (!nameToUse || !codeToUse) {
       setError('Please fill in all fields');
       return;
     }
@@ -91,19 +91,19 @@ export const EventConnectionScreen: React.FC = () => {
         return;
       }
 
-      // Find the event by name and password
+      // Find the event by name and code
       const { data: events, error: eventError } = await supabase
         .from('events')
         .select('*')
         .eq('name', nameToUse)
-        .eq('password', passwordToUse);
+        .eq('event_code', codeToUse);
       
       if (eventError) {
         throw eventError;
       }
       
       if (!events || events.length === 0) {
-        setError('No event found with that name and password');
+        setError('No event found with that name and code. Please check and try again.');
         setLoading(false);
         return;
       }
@@ -148,8 +148,8 @@ export const EventConnectionScreen: React.FC = () => {
       setError(err.message || 'Failed to join event');
     } finally {
       setLoading(false);
-      setPasswordModalVisible(false);
-      setPasswordInput('');
+      setCodeModalVisible(false);
+      setCodeInput('');
     }
   };
 
@@ -167,7 +167,7 @@ export const EventConnectionScreen: React.FC = () => {
           </View>
 
           <View style={styles.formContainer}>
-            <Text style={styles.sectionTitle}>Join by Name & Password</Text>
+            <Text style={styles.sectionTitle}>Join with Event Details</Text>
             
             <Input
               label="Event Name"
@@ -178,11 +178,12 @@ export const EventConnectionScreen: React.FC = () => {
             />
             
             <Input
-              label="Event Password"
-              value={eventPassword}
-              onChangeText={setEventPassword}
-              placeholder="Enter event password"
-              secureTextEntry
+              label="Event Code"
+              value={eventCode}
+              onChangeText={(text) => setEventCode(text.toUpperCase())}
+              placeholder="Enter 8-character event code"
+              autoCapitalize="characters"
+              maxLength={8}
             />
             
             {error && <Text style={styles.errorText}>{error}</Text>}
@@ -196,26 +197,27 @@ export const EventConnectionScreen: React.FC = () => {
           </View>
         </ScrollView>
 
-        {/* Password Modal - keeping this for potential future use */}
+        {/* Code Modal - keeping this for potential future use */}
         <Modal
           animationType="fade"
           transparent={true}
-          visible={passwordModalVisible}
-          onRequestClose={() => setPasswordModalVisible(false)}
+          visible={codeModalVisible}
+          onRequestClose={() => setCodeModalVisible(false)}
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Enter Password</Text>
+              <Text style={styles.modalTitle}>Enter Event Code</Text>
               <Text style={styles.modalSubtitle}>
-                {selectedEvent ? `Enter password for "${selectedEvent.name}"` : ''}
+                {selectedEvent ? `Enter code for "${selectedEvent.name}"` : ''}
               </Text>
               
               <TextInput
-                style={styles.passwordInput}
-                placeholder="Password"
-                value={passwordInput}
-                onChangeText={setPasswordInput}
-                secureTextEntry
+                style={styles.codeInput}
+                placeholder="8-character code"
+                value={codeInput}
+                onChangeText={(text) => setCodeInput(text.toUpperCase())}
+                autoCapitalize="characters"
+                maxLength={8}
                 autoFocus
               />
               
@@ -223,8 +225,8 @@ export const EventConnectionScreen: React.FC = () => {
                 <TouchableOpacity 
                   style={[styles.modalButton, styles.cancelButton]}
                   onPress={() => {
-                    setPasswordModalVisible(false);
-                    setPasswordInput('');
+                    setCodeModalVisible(false);
+                    setCodeInput('');
                     setSelectedEvent(null);
                   }}
                 >
@@ -234,8 +236,8 @@ export const EventConnectionScreen: React.FC = () => {
                 <TouchableOpacity 
                   style={[styles.modalButton, styles.joinButton]}
                   onPress={() => {
-                    if (selectedEvent && passwordInput) {
-                      handleJoinEvent(selectedEvent.name, passwordInput);
+                    if (selectedEvent && codeInput) {
+                      handleJoinEvent(selectedEvent.name, codeInput);
                     }
                   }}
                 >
@@ -313,7 +315,7 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginBottom: 16,
   },
-  passwordInput: {
+  codeInput: {
     borderWidth: 1,
     borderColor: '#E5E5EA',
     borderRadius: 8,

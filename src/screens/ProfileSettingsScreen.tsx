@@ -11,6 +11,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  Linking,
+  Modal,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -19,9 +21,16 @@ import { useAuth } from '../context/AuthContext';
 import { colors, typography, spacing, borderRadius } from '../styles/theme';
 import { HeaderBar } from '../components/HeaderBar';
 import { updateUserDisplayNameEverywhere } from '../lib/displayNameUtils';
+import { RootStackParamList } from '../../types';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+
+type ProfileScreenNavigationProp = NativeStackNavigationProp<
+  RootStackParamList,
+  'ProfileSettings'
+>;
 
 export const ProfileSettingsScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<ProfileScreenNavigationProp>();
   const { session, signOut } = useAuth();
   
   const [displayName, setDisplayName] = useState('');
@@ -33,6 +42,20 @@ export const ProfileSettingsScreen = () => {
   const [loading, setLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [updateSuccess, setUpdateSuccess] = useState(false);
+  
+  // Add state for reset password modal
+  const [resetPasswordModalVisible, setResetPasswordModalVisible] = useState(false);
+  const [resetVerificationCode, setResetVerificationCode] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+  
+  // Add new state variables for password visibility
+  const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false);
+  const [newPasswordVisible, setNewPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
+  const [resetNewPasswordVisible, setResetNewPasswordVisible] = useState(false);
+  const [resetConfirmPasswordVisible, setResetConfirmPasswordVisible] = useState(false);
   
   useEffect(() => {
     if (session?.user) {
@@ -178,6 +201,261 @@ export const ProfileSettingsScreen = () => {
     );
   };
   
+  // Handle back button
+  const handleBack = () => {
+    navigation.navigate('SignIn' as never);
+  };
+
+  const navigateToForgotPassword = async () => {
+    // Present a simple dialog to confirm the password reset
+    Alert.alert(
+      'Reset Password',
+      'We will send a verification code to your email. Continue?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Send Code',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              
+              // Request password reset for the currently logged-in user
+              const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: 'eventsnap://auth/callback',
+              });
+              
+              if (error) {
+                console.error('Error requesting password reset:', error);
+                Alert.alert('Error', 'Failed to request password reset. Please try again.');
+                return;
+              }
+              
+              // Show the reset password modal instead of just an alert
+              Alert.alert(
+                'Verification Code Sent',
+                'A verification code has been sent to your email. Enter it along with your new password.',
+                [{ text: 'OK', onPress: () => setResetPasswordModalVisible(true) }]
+              );
+            } catch (err) {
+              console.error('Error in password reset flow:', err);
+              Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleResetPassword = async () => {
+    // Validate inputs
+    if (!resetVerificationCode || resetVerificationCode.length < 6) {
+      Alert.alert('Error', 'Please enter the 6-digit verification code from your email');
+      return;
+    }
+    
+    if (!resetNewPassword || resetNewPassword.length < 8) {
+      Alert.alert('Error', 'Password must be at least 8 characters long');
+      return;
+    }
+    
+    if (resetNewPassword !== resetConfirmPassword) {
+      Alert.alert('Error', 'Passwords do not match');
+      return;
+    }
+    
+    setResetPasswordLoading(true);
+    
+    try {
+      // First verify the OTP code
+      console.log('Verifying code and resetting password...');
+      
+      // Verify the OTP first
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email,
+        token: resetVerificationCode,
+        type: 'recovery'
+      });
+      
+      if (verifyError) {
+        console.error('Verification error:', verifyError);
+        Alert.alert('Error', 'Invalid or expired verification code. Please try again.');
+        setResetPasswordLoading(false);
+        return;
+      }
+      
+      // Now update the password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: resetNewPassword
+      });
+      
+      if (updateError) {
+        Alert.alert('Error', updateError.message);
+      } else {
+        // First close the modal to prevent it reopening
+        setResetPasswordModalVisible(false);
+        
+        // Then show success message
+        setTimeout(() => {
+          Alert.alert(
+            'Success',
+            'Your password has been reset successfully.'
+          );
+        }, 300);
+        
+        // Clear the fields
+        setResetVerificationCode('');
+        setResetNewPassword('');
+        setResetConfirmPassword('');
+      }
+    } catch (err) {
+      console.error('Error resetting password:', err);
+      Alert.alert('Error', 'An unexpected error occurred');
+    } finally {
+      setResetPasswordLoading(false);
+    }
+  };
+  
+  const openUrl = async (url: string, errorMsg = 'Could not open URL') => {
+    try {
+      // First check if the URL can be opened
+      const supported = await Linking.canOpenURL(url);
+      
+      if (supported) {
+        await Linking.openURL(url);
+        console.log(`Opened URL: ${url}`);
+      } else {
+        console.error(`Cannot open URL: ${url}`);
+        Alert.alert('Error', `This device cannot open the URL: ${url}`);
+      }
+    } catch (err) {
+      console.error('Error opening URL:', err);
+      Alert.alert('Error', errorMsg, [
+        { text: 'OK' },
+        { 
+          text: 'Copy URL', 
+          onPress: () => {
+            // This would use clipboard functionality in a real app
+            Alert.alert('URL Copied', url);
+          }
+        }
+      ]);
+    }
+  };
+
+  const openWebsite = () => {
+    openUrl('https://codenova-eventsnap.vercel.app/', 'Could not open the website');
+  };
+
+  const openPrivacyPolicy = () => {
+    openUrl('https://codenova-eventsnap.vercel.app/privacy', 'Could not open the privacy policy');
+  };
+
+  const openTermsOfService = () => {
+    openUrl('https://codenova-eventsnap.vercel.app/terms', 'Could not open the terms of service');
+  };
+
+  const openDeleteAccountPage = () => {
+    openUrl('https://codenova-eventsnap.vercel.app/delete-account', 'Could not open the account deletion page');
+  };
+
+  // Render the reset password modal
+  const renderResetPasswordModal = () => {
+    return (
+      <Modal
+        visible={resetPasswordModalVisible}
+        transparent={true}
+        animationType="slide"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Reset Password</Text>
+              <TouchableOpacity 
+                onPress={() => setResetPasswordModalVisible(false)}
+                style={styles.closeButton}
+              >
+                <MaterialIcons name="close" size={24} color={colors.text.primary} />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalSubtitle}>
+              Enter the verification code from your email and set your new password
+            </Text>
+            
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Verification Code</Text>
+              <TextInput
+                style={[styles.input, styles.codeInput]}
+                placeholder="Enter 6-digit code"
+                value={resetVerificationCode}
+                onChangeText={setResetVerificationCode}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+            </View>
+            
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>New Password</Text>
+              <View style={styles.passwordInputContainer}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput]}
+                  placeholder="Enter new password"
+                  value={resetNewPassword}
+                  onChangeText={setResetNewPassword}
+                  secureTextEntry={!resetNewPasswordVisible}
+                />
+                <TouchableOpacity onPress={() => setResetNewPasswordVisible(!resetNewPasswordVisible)}>
+                  <MaterialIcons 
+                    name={resetNewPasswordVisible ? "visibility" : "visibility-off"} 
+                    size={20} 
+                    color={colors.text.tertiary} 
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Confirm Password</Text>
+              <View style={styles.passwordInputContainer}>
+                <TextInput
+                  style={[styles.input, styles.passwordInput]}
+                  placeholder="Confirm new password"
+                  value={resetConfirmPassword}
+                  onChangeText={setResetConfirmPassword}
+                  secureTextEntry={!resetConfirmPasswordVisible}
+                />
+                <TouchableOpacity onPress={() => setResetConfirmPasswordVisible(!resetConfirmPasswordVisible)}>
+                  <MaterialIcons 
+                    name={resetConfirmPasswordVisible ? "visibility" : "visibility-off"} 
+                    size={20} 
+                    color={colors.text.tertiary} 
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            <TouchableOpacity
+              style={[styles.button, styles.resetPasswordButton]}
+              onPress={handleResetPassword}
+              disabled={resetPasswordLoading}
+            >
+              {resetPasswordLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.buttonText}>Reset Password</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   if (profileLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -276,9 +554,15 @@ export const ProfileSettingsScreen = () => {
                   value={currentPassword}
                   onChangeText={setCurrentPassword}
                   placeholder="Enter current password"
-                  secureTextEntry
+                  secureTextEntry={!currentPasswordVisible}
                 />
-                <MaterialIcons name="visibility-off" size={20} color={colors.text.tertiary} />
+                <TouchableOpacity onPress={() => setCurrentPasswordVisible(!currentPasswordVisible)}>
+                  <MaterialIcons 
+                    name={currentPasswordVisible ? "visibility" : "visibility-off"} 
+                    size={20} 
+                    color={colors.text.tertiary} 
+                  />
+                </TouchableOpacity>
               </View>
             </View>
             
@@ -290,9 +574,15 @@ export const ProfileSettingsScreen = () => {
                   value={newPassword}
                   onChangeText={setNewPassword}
                   placeholder="Enter new password"
-                  secureTextEntry
+                  secureTextEntry={!newPasswordVisible}
                 />
-                <MaterialIcons name="visibility-off" size={20} color={colors.text.tertiary} />
+                <TouchableOpacity onPress={() => setNewPasswordVisible(!newPasswordVisible)}>
+                  <MaterialIcons 
+                    name={newPasswordVisible ? "visibility" : "visibility-off"} 
+                    size={20} 
+                    color={colors.text.tertiary} 
+                  />
+                </TouchableOpacity>
               </View>
             </View>
             
@@ -304,9 +594,15 @@ export const ProfileSettingsScreen = () => {
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   placeholder="Confirm new password"
-                  secureTextEntry
+                  secureTextEntry={!confirmPasswordVisible}
                 />
-                <MaterialIcons name="visibility-off" size={20} color={colors.text.tertiary} />
+                <TouchableOpacity onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}>
+                  <MaterialIcons 
+                    name={confirmPasswordVisible ? "visibility" : "visibility-off"} 
+                    size={20} 
+                    color={colors.text.tertiary} 
+                  />
+                </TouchableOpacity>
               </View>
             </View>
             
@@ -324,6 +620,60 @@ export const ProfileSettingsScreen = () => {
                 </>
               )}
             </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.forgotPasswordLink}
+              onPress={navigateToForgotPassword}
+            >
+              <Text style={styles.linkText}>Forgot your password? Reset it here</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <MaterialIcons name="info" size={22} color={colors.primary} />
+              <Text style={styles.cardTitle}>Account Management</Text>
+            </View>
+            
+            <TouchableOpacity style={styles.linkRow} onPress={openWebsite}>
+              <MaterialIcons name="public" size={20} color={colors.primary} />
+              <Text style={styles.linkText}>Visit our website</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.linkRow} 
+              onPress={openPrivacyPolicy}
+            >
+              <MaterialIcons name="privacy-tip" size={20} color={colors.primary} />
+              <Text style={styles.linkText}>Privacy Policy</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.linkRow}
+              onPress={openTermsOfService}
+            >
+              <MaterialIcons name="description" size={20} color={colors.primary} />
+              <Text style={styles.linkText}>Terms of Service</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.linkRow, styles.deleteAccountRow]}
+              onPress={() => Alert.alert(
+                'Delete Account',
+                'Are you sure you want to delete your account? This action cannot be undone and all your data will be permanently removed.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { 
+                    text: 'Continue', 
+                    style: 'destructive',
+                    onPress: openDeleteAccountPage 
+                  }
+                ]
+              )}
+            >
+              <MaterialIcons name="delete" size={20} color="#FF3B30" />
+              <Text style={[styles.linkText, styles.deleteAccountText]}>Delete Your Account</Text>
+            </TouchableOpacity>
           </View>
           
           <TouchableOpacity
@@ -340,6 +690,9 @@ export const ProfileSettingsScreen = () => {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      
+      {/* Add the password reset modal */}
+      {renderResetPasswordModal()}
     </View>
   );
 };
@@ -521,5 +874,82 @@ const styles = StyleSheet.create({
   helperText: {
     fontSize: typography.sizes.sm,
     color: colors.text.secondary,
+  },
+  forgotPasswordLink: {
+    alignItems: 'center',
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  linkText: {
+    color: colors.primary,
+    fontSize: typography.sizes.md,
+    marginLeft: spacing.sm,
+  },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  deleteAccountRow: {
+    borderBottomWidth: 0,
+  },
+  deleteAccountText: {
+    color: '#FF3B30',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  modalContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.md,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 500,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 5,
+      },
+    }),
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+  },
+  closeButton: {
+    padding: spacing.xs,
+  },
+  modalSubtitle: {
+    fontSize: typography.sizes.md,
+    color: colors.text.secondary,
+    marginBottom: spacing.xl,
+  },
+  codeInput: {
+    textAlign: 'center',
+    letterSpacing: 10,
+    fontSize: typography.sizes.lg,
+    fontWeight: 'bold',
+  },
+  resetPasswordButton: {
+    backgroundColor: colors.primary,
+    marginTop: spacing.lg,
   },
 }); 

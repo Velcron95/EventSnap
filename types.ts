@@ -46,4 +46,5 @@ export type RootStackParamList = {
   EventConnection: undefined;
   CreateEvent: undefined;
   ProfileSettings: undefined;
+  ForgotPassword: { step?: string; email?: string; comingFromProfile?: boolean };
 }; 

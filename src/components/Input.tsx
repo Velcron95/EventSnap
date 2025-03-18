@@ -25,6 +25,7 @@ interface InputProps {
   inputStyle?: StyleProp<TextStyle>;
   multiline?: boolean;
   numberOfLines?: number;
+  maxLength?: number;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -40,6 +41,7 @@ export const Input: React.FC<InputProps> = ({
   inputStyle,
   multiline,
   numberOfLines,
+  maxLength,
 }) => {
   const [isSecureTextVisible, setIsSecureTextVisible] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -67,6 +69,7 @@ export const Input: React.FC<InputProps> = ({
           onBlur={() => setIsFocused(false)}
           multiline={multiline}
           numberOfLines={numberOfLines}
+          maxLength={maxLength}
         />
         {secureTextEntry && (
           <TouchableOpacity

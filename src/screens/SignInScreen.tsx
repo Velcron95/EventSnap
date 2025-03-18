@@ -6,13 +6,16 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   Switch,
+  Alert,
+  Linking,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types';
 import { supabase } from '../lib/supabase';
+import { CustomAlert } from '../components/CustomAlert';
+import { useCustomAlert } from '../hooks/useCustomAlert';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SignIn'>;
 
@@ -22,10 +25,40 @@ export const SignInScreen: React.FC<Props> = ({ navigation }) => {
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
+  const { alertProps, showAlert } = useCustomAlert();
+
+  const openUrl = async (url: string, errorMsg = 'Could not open URL') => {
+    try {
+      const supported = await Linking.canOpenURL(url);
+      
+      if (supported) {
+        await Linking.openURL(url);
+        console.log(`Opened URL: ${url}`);
+      } else {
+        console.error(`Cannot open URL: ${url}`);
+        Alert.alert('Error', `This device cannot open the URL: ${url}`);
+      }
+    } catch (err) {
+      console.error('Error opening URL:', err);
+      Alert.alert('Error', errorMsg, [
+        { text: 'OK' },
+        { 
+          text: 'Copy URL', 
+          onPress: () => {
+            Alert.alert('URL Copied', url);
+          }
+        }
+      ]);
+    }
+  };
 
   const handleSignIn = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: 'Please fill in all fields'
+      });
       return;
     }
 
@@ -38,32 +71,35 @@ export const SignInScreen: React.FC<Props> = ({ navigation }) => {
         
         // Provide more helpful error messages
         if (error.message.includes('Invalid login credentials')) {
-          Alert.alert(
-            'Login Failed', 
-            'Invalid email or password. Please check your credentials and try again.'
-          );
+          showAlert({
+            type: 'error',
+            title: 'Login Failed',
+            message: 'Invalid email or password. Please check your credentials and try again.'
+          });
         } else if (error.message.includes('Email not confirmed') || error.message.includes('not confirmed')) {
-          Alert.alert(
-            'Email Not Verified', 
-            'Please check your email for a verification link and click it before logging in. If you did not receive an email, you can request a new verification email.',
-            [
-              {
-                text: 'Cancel',
-                style: 'cancel'
-              },
-              {
-                text: 'Resend Verification',
-                onPress: () => handleResendVerification()
-              }
-            ]
-          );
+          showAlert({
+            type: 'warning',
+            title: 'Email Not Verified',
+            message: 'Please check your email for a verification link and click it before logging in. If you did not receive an email, you can request a new verification email.',
+            confirmText: 'Resend Verification',
+            cancelText: 'Cancel',
+            onConfirm: handleResendVerification
+          });
         } else {
-          Alert.alert('Error', error.message);
+          showAlert({
+            type: 'error',
+            title: 'Error',
+            message: error.message
+          });
         }
       }
     } catch (error) {
       console.error('Unexpected error during sign in:', error);
-      Alert.alert('Error', 'An unexpected error occurred');
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: 'An unexpected error occurred'
+      });
     } finally {
       setLoading(false);
     }
@@ -71,7 +107,11 @@ export const SignInScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleResendVerification = async () => {
     if (!email) {
-      Alert.alert('Error', 'Please enter your email address');
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: 'Please enter your email address'
+      });
       return;
     }
 
@@ -88,46 +128,26 @@ export const SignInScreen: React.FC<Props> = ({ navigation }) => {
       setLoading(false);
       
       if (error) {
-        Alert.alert('Error', error.message);
+        showAlert({
+          type: 'error',
+          title: 'Error',
+          message: error.message
+        });
       } else {
-        Alert.alert(
-          'Verification Email Sent',
-          'Please check your email for a new verification link. Be sure to check your spam folder if you don\'t see it in your inbox.'
-        );
+        showAlert({
+          type: 'success',
+          title: 'Verification Email Sent',
+          message: 'Please check your email for a new verification link. Be sure to check your spam folder if you don\'t see it in your inbox.'
+        });
       }
     } catch (error) {
       setLoading(false);
       console.error('Error sending verification email:', error);
-      Alert.alert('Error', 'Failed to send verification email');
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!email) {
-      Alert.alert('Error', 'Please enter your email address');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'eventsnap://auth/reset-password',
+      showAlert({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to send verification email'
       });
-
-      setLoading(false);
-      
-      if (error) {
-        Alert.alert('Error', error.message);
-      } else {
-        Alert.alert(
-          'Password Reset Email Sent',
-          'Please check your email for instructions to reset your password.'
-        );
-      }
-    } catch (error) {
-      setLoading(false);
-      console.error('Error sending reset password email:', error);
-      Alert.alert('Error', 'Failed to send password reset email');
     }
   };
 
@@ -172,6 +192,16 @@ export const SignInScreen: React.FC<Props> = ({ navigation }) => {
         )}
       </TouchableOpacity>
 
+      <TouchableOpacity 
+        style={styles.forgotPasswordButton}
+        onPress={() => {
+          console.log('Navigation to ForgotPassword screen triggered');
+          navigation.navigate('ForgotPassword', { email } as never);
+        }}
+      >
+        <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+      </TouchableOpacity>
+
       <View style={styles.linksContainer}>
         <TouchableOpacity
           style={styles.linkButton}
@@ -181,16 +211,27 @@ export const SignInScreen: React.FC<Props> = ({ navigation }) => {
             Don't have an account? Sign Up
           </Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.linkButton}
-          onPress={handleForgotPassword}
-        >
-          <Text style={styles.linkText}>
-            Forgot Password?
+        
+        <View style={styles.termsContainer}>
+          <Text style={styles.termsText}>
+            By using this app, you agree to our{' '}
           </Text>
-        </TouchableOpacity>
+          <TouchableOpacity 
+            onPress={() => openUrl('https://codenova-eventsnap.vercel.app/terms', 'Could not open Terms of Service')}
+          >
+            <Text style={styles.linkText}>Terms of Service</Text>
+          </TouchableOpacity>
+          <Text style={styles.termsText}> and </Text>
+          <TouchableOpacity 
+            onPress={() => openUrl('https://codenova-eventsnap.vercel.app/privacy', 'Could not open Privacy Policy')}
+          >
+            <Text style={styles.linkText}>Privacy Policy</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {/* CustomAlert component */}
+      <CustomAlert {...alertProps} />
     </View>
   );
 };
@@ -246,5 +287,24 @@ const styles = StyleSheet.create({
   linkText: {
     color: '#007AFF',
     fontSize: 16,
+  },
+  forgotPasswordButton: {
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  forgotPasswordText: {
+    color: '#007AFF',
+    fontSize: 16,
+  },
+  termsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginTop: 20,
+    paddingHorizontal: 20,
+  },
+  termsText: {
+    fontSize: 14,
+    color: '#666',
   },
 }); 

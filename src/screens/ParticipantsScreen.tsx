@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, SafeAreaView, BackHandler } from 'react-native';
+import React, { useEffect, useState, useLayoutEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, SafeAreaView, BackHandler, Clipboard } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
@@ -33,7 +33,11 @@ type Participant = {
   };
 };
 
-export const ParticipantsScreen = () => {
+// Add this helper function at the top of the file
+const ONE_MINUTE = 60 * 1000;
+
+// Wrap the component with React.memo to prevent unnecessary re-renders
+export const ParticipantsScreen = React.memo(() => {
   const navigation = useNavigation<ParticipantsScreenNavigationProp>();
   const route = useRoute<ParticipantsScreenRouteProp>();
   const { currentEvent, isCreator, refreshEvent, setCurrentEvent } = useEvent();
@@ -51,10 +55,7 @@ export const ParticipantsScreen = () => {
   
   // Change password state
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [changingPassword, setChangingPassword] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | undefined>(undefined);
+  const [eventCode, setEventCode] = useState<string>('');
 
   // Get event ID from route params or context
   const eventId = route.params?.eventId || currentEvent?.id;
@@ -89,33 +90,30 @@ export const ParticipantsScreen = () => {
     }, [showBlockModal, showPasswordModal])
   );
 
-  // Add useFocusEffect to refresh participants when screen comes into focus
+  // Add ref to track last fetch time
+  const lastFetchTime = useRef<number>(0);
+  
+  // Only fetch data when focused if needed
   useFocusEffect(
     React.useCallback(() => {
-      console.log('ParticipantsScreen focused - refreshing participants to update display names');
       if (eventId) {
-        // First, refresh the current user's display name in all tables
-        (async () => {
-          try {
-            // Refresh the current user's display name in all tables
-            await refreshCurrentUserDisplayName();
-            console.log('Refreshed current user display name in all tables');
-          } catch (error) {
-            console.error('Error refreshing display name:', error);
-          }
-          
-          // Then fetch participants and blocked users
+        console.log('ParticipantsScreen focused - checking if refresh needed');
+        
+        // Check if we need to refresh data
+        const now = Date.now();
+        // Only fetch if data is stale (older than 1 minute) or no data exists
+        if (!participants.length || (now - lastFetchTime.current > ONE_MINUTE)) {
+          console.log('Fetching fresh participants data');
           fetchParticipants();
-          if (isCreator) {
-            fetchBlockedUsers();
-          }
-        })();
+          lastFetchTime.current = now;
+        } else {
+          console.log('Using cached participants data');
+        }
       }
-      
       return () => {
-        // Cleanup if needed
+        // Clean up if needed
       };
-    }, [eventId, isCreator])
+    }, [eventId, participants.length])
   );
 
   useEffect(() => {
@@ -218,7 +216,7 @@ export const ParticipantsScreen = () => {
       // First, get the event details to get the creator
       const { data: eventData, error: eventError } = await supabase
         .from('events')
-        .select('id, name, created_by, created_at, creator_display_name')
+        .select('id, name, created_by, created_at, creator_display_name, event_code')
         .eq('id', eventId)
         .single();
         
@@ -228,6 +226,11 @@ export const ParticipantsScreen = () => {
       }
       
       console.log('Event data:', JSON.stringify(eventData, null, 2));
+      
+      // Store the event code
+      if (eventData?.event_code) {
+        setEventCode(eventData.event_code);
+      }
       
       // Get participants for the current event with display_name
       const { data: participantsData, error: participantsError } = await supabase
@@ -751,48 +754,9 @@ export const ParticipantsScreen = () => {
     }
   };
 
-  // Add a function to handle changing the event password
-  const handleChangePassword = async () => {
-    if (!eventId || !isCreator) {
-      Alert.alert('Error', 'Only the event creator can change the password');
-      return;
-    }
-
-    if (!newPassword) {
-      setPasswordError('Please enter a new password');
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setPasswordError('Passwords do not match');
-      return;
-    }
-
-    setChangingPassword(true);
-    setPasswordError(undefined);
-
-    try {
-      // Update the event password in the database
-      const { error } = await supabase
-        .from('events')
-        .update({ password: newPassword })
-        .eq('id', eventId);
-
-      if (error) {
-        throw error;
-      }
-
-      // Success
-      Alert.alert('Success', 'Event password has been updated');
-      setShowPasswordModal(false);
-      setNewPassword('');
-      setConfirmPassword('');
-    } catch (error) {
-      console.error('Error changing event password:', error);
-      setPasswordError('Failed to update password');
-    } finally {
-      setChangingPassword(false);
-    }
+  // Function to copy text to clipboard
+  const copyToClipboard = (text: string) => {
+    Clipboard.setString(text);
   };
 
   const renderParticipantItem = ({ item }: { item: Participant }) => {
@@ -919,9 +883,6 @@ export const ParticipantsScreen = () => {
             >
               <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
-            <Text style={styles.eventName} numberOfLines={1} ellipsizeMode="tail">
-              Event: {eventName}
-            </Text>
           </View>
           <View style={styles.eventActions}>
             {isCreator && (
@@ -931,7 +892,7 @@ export const ParticipantsScreen = () => {
                   style={styles.actionButton}
                   onPress={() => setShowPasswordModal(true)}
                 >
-                  <MaterialIcons name="vpn-key" size={24} color="#FFFFFF" />
+                  <MaterialIcons name="key" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
               </>
             )}
@@ -1079,7 +1040,7 @@ export const ParticipantsScreen = () => {
         </View>
       </Modal>
 
-      {/* Add the change password modal */}
+      {/* Event Code Modal (previously password modal) */}
       <Modal
         visible={showPasswordModal}
         transparent={true}
@@ -1095,39 +1056,28 @@ export const ParticipantsScreen = () => {
               </TouchableOpacity>
             </View>
             
-            <Text style={styles.modalSectionTitle}>Change Event Password</Text>
+            <Text style={styles.modalSectionTitle}>Event Access Code</Text>
             <Text style={styles.modalText}>
-              Enter a new password for the event. Make sure to share it with participants who need access.
+              Share this code with others who want to join your event. They'll need both the event name and this code.
             </Text>
             
-            <TextInput
-              style={styles.input}
-              placeholder="New Password"
-              value={newPassword}
-              onChangeText={setNewPassword}
-              secureTextEntry
-            />
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Confirm Password"
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry
-            />
-            
-            {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
-            
-            {changingPassword ? (
-              <ActivityIndicator size="small" color={colors.primary} style={styles.modalButton} />
-            ) : (
+            <View style={styles.codeContainer}>
+              <Text style={styles.eventCodeDisplay}>{eventCode}</Text>
               <TouchableOpacity
-                style={styles.modalButton}
-                onPress={handleChangePassword}
+                style={styles.copyButton}
+                onPress={() => copyToClipboard(eventCode)}
               >
-                <Text style={styles.modalButtonText}>Update Password</Text>
+                <MaterialIcons name="content-copy" size={20} color="#FFFFFF" />
               </TouchableOpacity>
-            )}
+            </View>
+
+            <TouchableOpacity
+              style={styles.shareCodeButton}
+              onPress={() => copyToClipboard(eventCode)}
+            >
+              <MaterialIcons name="share" size={18} color="#FFFFFF" />
+              <Text style={styles.shareCodeText}>Copy Event Code</Text>
+            </TouchableOpacity>
 
             <View style={styles.modalDivider} />
 
@@ -1161,7 +1111,10 @@ export const ParticipantsScreen = () => {
       )}
     </View>
   );
-};
+});
+
+// Add display name for debugging
+ParticipantsScreen.displayName = 'ParticipantsScreen';
 
 const styles = StyleSheet.create({
   container: {
@@ -1513,6 +1466,47 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   deleteEventModalText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  codeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f8ff',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    marginBottom: 16,
+  },
+  eventCodeDisplay: {
+    flex: 1,
+    fontSize: 24,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  copyButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  shareCodeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  shareCodeText: {
     color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 16,

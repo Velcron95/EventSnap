@@ -1,11 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
   StyleSheet, 
   TouchableOpacity, 
   ActivityIndicator, 
-  Alert,
   Image,
   SafeAreaView,
   BackHandler
@@ -20,6 +19,14 @@ import { useAuth } from '../context/AuthContext';
 import { useEvent } from '../context/EventContext';
 import { supabase } from '../lib/supabase';
 import { LoadingOverlay } from '../components/LoadingOverlay';
+import { UploadSuccessIndicator } from '../components/UploadSuccessIndicator';
+import { CustomAlert } from '../components/CustomAlert';
+import { useCustomAlert } from '../hooks/useCustomAlert';
+import { useSupabaseClient } from '@supabase/auth-helpers-react';
+import { CameraType, FlashMode, CameraCapturedPicture } from 'expo-camera';
+import { CameraComponent } from '../components/CameraComponent';
+import { v4 as uuidv4 } from 'uuid';
+import { showErrorAlert, showSuccessAlert } from '../utils/alert';
 
 // Define the route params type
 type CameraScreenRouteParams = {
@@ -33,6 +40,7 @@ export const CameraScreen = () => {
   const route = useRoute();
   const { session } = useAuth();
   const { currentEvent, isCreator } = useEvent();
+  const { alertProps, showAlert } = useCustomAlert();
   
   // Camera state
   const [permission, requestPermission] = useCameraPermissions();
@@ -44,6 +52,7 @@ export const CameraScreen = () => {
   // Image preview state
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
   
   // Get event ID from route params or context
   const routeParams = route.params as CameraScreenRouteParams;
@@ -55,7 +64,7 @@ export const CameraScreen = () => {
   // Check if event is selected
   useEffect(() => {
     if (!eventId) {
-      Alert.alert('Error', 'No event selected. Please select an event first.');
+      showErrorAlert('Error', 'No event selected. Please select an event first.');
       navigation.navigate('Events');
       return;
     }
@@ -93,19 +102,20 @@ export const CameraScreen = () => {
         quality: 0.7,
         exif: false
       });
+      
       if (photo) {
         setCapturedImage(photo.uri);
       }
     } catch (error) {
       console.error('Error taking picture:', error);
-      Alert.alert('Error', 'Failed to take picture');
+      showErrorAlert('Error', 'Failed to take picture');
     }
   };
 
   // Upload media to Supabase
   const uploadMedia = async (uri: string) => {
     if (!currentEvent || !user) {
-      Alert.alert('Error', 'You must be logged in and have an active event to upload media');
+      showErrorAlert('Error', 'You must be logged in and have an active event to upload media');
       return;
     }
 
@@ -181,10 +191,10 @@ export const CameraScreen = () => {
       }
 
       console.log('Database entry created:', mediaData);
-      Alert.alert('Success', 'Your photo has been uploaded to the event gallery!');
+      // Just show checkmark animation without alert
+      setUploadSuccess(true);
       
-      // Clear preview and stay on camera screen
-      setCapturedImage(null);
+      // Clear preview after success indicator animation completes
     } catch (error: unknown) {
       console.error('Error uploading photo:', error);
       // More detailed error message
@@ -192,7 +202,7 @@ export const CameraScreen = () => {
       if (error instanceof Error) {
         errorMessage += ` Error: ${error.message}`;
       }
-      Alert.alert('Upload Failed', errorMessage);
+      showErrorAlert('Upload Failed', errorMessage);
     } finally {
       setUploading(false);
     }
@@ -206,6 +216,13 @@ export const CameraScreen = () => {
       bytes[i] = binaryString.charCodeAt(i);
     }
     return bytes;
+  };
+
+  // Handle upload success animation complete
+  const handleUploadSuccessComplete = () => {
+    setUploadSuccess(false);
+    setCapturedImage(null);
+    setUploading(false);
   };
 
   // Discard the preview and return to camera
@@ -249,29 +266,35 @@ export const CameraScreen = () => {
         <View style={styles.previewContainer}>
           <Image source={{ uri: capturedImage }} style={styles.preview} />
           
-          <View style={styles.previewControls}>
-            {uploading ? (
-              <LoadingOverlay isVisible={true} message="Uploading photo..." />
-            ) : (
-              <>
-                <TouchableOpacity 
-                  style={styles.previewButton}
-                  onPress={discardPreview}
-                >
-                  <MaterialIcons name="close" size={24} color="#fff" />
-                  <Text style={styles.buttonText}>Discard</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={[styles.previewButton, styles.uploadButton]}
-                  onPress={() => uploadMedia(capturedImage)}
-                >
-                  <MaterialIcons name="cloud-upload" size={24} color="#fff" />
-                  <Text style={styles.buttonText}>Upload to Event</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
+          {uploading ? (
+            <View style={styles.uploadingOverlay}>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text style={styles.uploadingText}>Uploading...</Text>
+            </View>
+          ) : (
+            <View style={styles.previewControls}>
+              <TouchableOpacity
+                style={styles.previewButton}
+                onPress={discardPreview}
+              >
+                <MaterialIcons name="close" size={24} color="#fff" />
+                <Text style={styles.buttonText}>Discard</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.previewButton}
+                onPress={() => uploadMedia(capturedImage)}
+              >
+                <MaterialIcons name="cloud-upload" size={24} color="#fff" />
+                <Text style={styles.buttonText}>Upload to Event</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          <UploadSuccessIndicator 
+            visible={uploadSuccess} 
+            onAnimationComplete={handleUploadSuccessComplete}
+          />
         </View>
       </SafeAreaView>
     );
@@ -280,13 +303,14 @@ export const CameraScreen = () => {
   // Main camera view
   return (
     <View style={styles.container}>
-      <CameraView 
+      <CameraView
+        ref={cameraRef}
         style={styles.camera}
         facing={cameraType}
         enableTorch={flash === 'on'}
         flash={flash}
         zoom={zoom}
-        ref={cameraRef}
+        mirror={cameraType === 'front'}
       >
         <View style={styles.topControls}>
           <TouchableOpacity 
@@ -373,6 +397,9 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
+  controlsContainer: {
+    flex: 1,
+  },
   topControls: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -388,7 +415,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
   },
-  controlButton: {
+  iconButton: {
     width: 50,
     height: 50,
     borderRadius: 25,
@@ -435,7 +462,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
   },
   uploadButton: {
-    backgroundColor: 'rgba(0,122,255,0.8)',
+    backgroundColor: 'rgba(76, 175, 80, 0.8)', // Green with opacity
   },
   button: {
     backgroundColor: 'rgba(0,122,255,0.8)',
@@ -459,23 +486,57 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 30,
   },
+  topRightControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  uploadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  uploadingText: {
+    color: '#fff',
+    fontSize: 18,
+    marginTop: 10,
+  },
+  previewActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    padding: 20,
+  },
+  discardButton: {
+    backgroundColor: 'rgba(255,0,0,0.8)',
+  },
+  controlButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   zoomControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: 20,
-    paddingHorizontal: 10,
   },
   zoomButton: {
-    width: 40,
-    height: 40,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   zoomText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginHorizontal: 5,
+    fontSize: 18,
+    marginHorizontal: 10,
   },
 }); 
