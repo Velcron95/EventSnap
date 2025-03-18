@@ -81,49 +81,51 @@ export const GalleryScreen = () => {
 
   // More direct approach to navigate with animation
   const navigateWithAnimation = (direction: 'next' | 'previous') => {
+    console.log('navigateWithAnimation called with direction:', direction);
+    console.log('Current media:', selectedMedia?.id);
+    console.log('Current index:', currentIndex);
+    console.log('Total media items:', filteredMedia.length);
+    
     const isNext = direction === 'next';
     const animationDistance = isNext ? -width : width;
     
-    // Find the correct next/previous media item
+    // Find the correct next/previous media item directly from filteredMedia array
     const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
+    console.log('Found index in array:', currentIdx);
+    
+    let nextMediaItem = null;
+    let nextIdx = currentIdx;
+    
     if (isNext && currentIdx < filteredMedia.length - 1) {
-      const nextIdx = currentIdx + 1;
-      const nextMedia = filteredMedia[nextIdx];
-      
-      // First animate current image out
-      Animated.timing(translateX, {
-        toValue: animationDistance,
-        duration: 250,
-        useNativeDriver: true,
-      }).start(() => {
-        // Update to new image
-        setCurrentIndex(nextIdx);
-        setSelectedMedia(nextMedia);
-        
-        // Reset position for animation in
-        translateX.setValue(-animationDistance);
-        
-        // Animate new image in
-        Animated.timing(translateX, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }).start();
-      });
-      
+      nextIdx = currentIdx + 1;
+      nextMediaItem = filteredMedia[nextIdx];
+      console.log('Moving to next image, index:', nextIdx, 'id:', nextMediaItem.id);
     } else if (!isNext && currentIdx > 0) {
-      const prevIdx = currentIdx - 1;
-      const prevMedia = filteredMedia[prevIdx];
-      
+      nextIdx = currentIdx - 1;
+      nextMediaItem = filteredMedia[nextIdx];
+      console.log('Moving to previous image, index:', nextIdx, 'id:', nextMediaItem.id);
+    } else {
+      console.log('Cannot navigate further in this direction');
+      // Reset position with spring animation
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true,
+        friction: 5,
+      }).start();
+      return;
+    }
+    
+    if (nextMediaItem) {
       // First animate current image out
       Animated.timing(translateX, {
         toValue: animationDistance,
-        duration: 250,
+        duration: 200,
         useNativeDriver: true,
       }).start(() => {
+        console.log('First animation completed, updating selected media');
         // Update to new image
-        setCurrentIndex(prevIdx);
-        setSelectedMedia(prevMedia);
+        setSelectedMedia(nextMediaItem);
+        setCurrentIndex(nextIdx);
         
         // Reset position for animation in
         translateX.setValue(-animationDistance);
@@ -131,9 +133,11 @@ export const GalleryScreen = () => {
         // Animate new image in
         Animated.timing(translateX, {
           toValue: 0,
-          duration: 250,
+          duration: 200,
           useNativeDriver: true,
-        }).start();
+        }).start(() => {
+          console.log('Second animation completed, transition finished');
+        });
       });
     }
   };
@@ -150,27 +154,22 @@ export const GalleryScreen = () => {
       },
       onPanResponderRelease: (_, gestureState) => {
         const { dx, vx } = gestureState;
+        console.log('Pan responder release, dx:', dx, 'vx:', vx);
         
         // If swipe is fast enough or far enough
         if (Math.abs(dx) > width * 0.3 || Math.abs(vx) > 0.3) {
           // Swiped left (next image)
-          if (dx < 0 && currentIndex < filteredMedia.length - 1) {
+          if (dx < 0) {
+            console.log('Swiped left, trying to go to next image');
             navigateWithAnimation('next');
           } 
           // Swiped right (previous image)
-          else if (dx > 0 && currentIndex > 0) {
+          else if (dx > 0) {
+            console.log('Swiped right, trying to go to previous image');
             navigateWithAnimation('previous');
-          } 
-          // Can't swipe in this direction
-          else {
-            // Reset position - bounce back
-            Animated.spring(translateX, {
-              toValue: 0,
-              useNativeDriver: true,
-              friction: 5,
-            }).start();
           }
         } else {
+          console.log('Not a significant swipe, resetting position');
           // Not a significant swipe, reset position with spring animation
           Animated.spring(translateX, {
             toValue: 0,
@@ -858,9 +857,12 @@ export const GalleryScreen = () => {
     }
   };
 
-  // Show fullscreen image
+  // Show fullscreen image with debug logging
   const showFullScreenImage = (item: MediaWithUser) => {
+    console.log('showFullScreenImage called for item:', item.id);
     const index = filteredMedia.findIndex(m => m.id === item.id);
+    console.log('Found index:', index, 'of', filteredMedia.length, 'items');
+    
     setCurrentIndex(index >= 0 ? index : 0);
     setSelectedMedia(item);
     setFullScreenVisible(true);
@@ -869,6 +871,7 @@ export const GalleryScreen = () => {
 
   // Close fullscreen image
   const closeFullScreenImage = () => {
+    console.log('closeFullScreenImage called');
     setFullScreenVisible(false);
     setSelectedMedia(null);
     setHeaderVisible(true); // Show header when closing fullscreen
@@ -1097,7 +1100,16 @@ export const GalleryScreen = () => {
   const renderFullScreenImage = () => {
     if (!selectedMedia) return null;
     
+    // Re-calculate the index each time to ensure it's correct
     const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia.id);
+    console.log('Current index in renderFullScreenImage:', currentIdx);
+    
+    // Update current index if it doesn't match
+    if (currentIndex !== currentIdx && currentIdx >= 0) {
+      console.log('Updating currentIndex to match array position');
+      setCurrentIndex(currentIdx);
+    }
+    
     const hasPrevious = currentIdx > 0;
     const hasNext = currentIdx < filteredMedia.length - 1;
     
@@ -1122,14 +1134,6 @@ export const GalleryScreen = () => {
     else if (selectedMedia.user?.display_name) {
       displayName = selectedMedia.user.display_name;
     }
-    
-    console.log('Rendering full screen image with user data:', {
-      userId: selectedMedia.user_id,
-      displayName: displayName,
-      isCreator: isCreatorMedia,
-      currentEventCreator: currentEvent?.created_by,
-      creatorDisplayName: currentEvent?.creator_display_name
-    });
     
     return (
       <View style={styles.fullScreenContainer}>
