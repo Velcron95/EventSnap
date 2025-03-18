@@ -81,63 +81,68 @@ export const GalleryScreen = () => {
 
   // More direct approach to navigate with animation
   const navigateWithAnimation = (direction: 'next' | 'previous') => {
-    console.log('navigateWithAnimation called with direction:', direction);
-    console.log('Current media:', selectedMedia?.id);
-    console.log('Current index:', currentIndex);
-    console.log('Total media items:', filteredMedia.length);
-    
-    const isNext = direction === 'next';
-    const animationDistance = isNext ? -width : width;
-    
-    // Find the correct next/previous media item directly from filteredMedia array
-    const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
-    console.log('Found index in array:', currentIdx);
-    
-    let nextMediaItem = null;
-    let nextIdx = currentIdx;
-    
-    if (isNext && currentIdx < filteredMedia.length - 1) {
-      nextIdx = currentIdx + 1;
-      nextMediaItem = filteredMedia[nextIdx];
-      console.log('Moving to next image, index:', nextIdx, 'id:', nextMediaItem.id);
-    } else if (!isNext && currentIdx > 0) {
-      nextIdx = currentIdx - 1;
-      nextMediaItem = filteredMedia[nextIdx];
-      console.log('Moving to previous image, index:', nextIdx, 'id:', nextMediaItem.id);
+    if (direction === 'next') {
+      navigateToNextImageWithAnimation();
     } else {
-      console.log('Cannot navigate further in this direction');
-      // Reset position with spring animation
-      Animated.spring(translateX, {
-        toValue: 0,
-        useNativeDriver: true,
-        friction: 5,
-      }).start();
-      return;
+      navigateToPreviousImageWithAnimation();
     }
-    
-    if (nextMediaItem) {
-      // First animate current image out
+  };
+
+  // Update the navigation with arrow buttons to use the same animation pattern as swiping
+  const navigateToNextImageWithAnimation = () => {
+    const actualCurrentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
+    if (actualCurrentIdx < filteredMedia.length - 1) {
+      const nextIdx = actualCurrentIdx + 1;
+      const nextItem = filteredMedia[nextIdx];
+      
+      // Animate current image off screen to the left
       Animated.timing(translateX, {
-        toValue: animationDistance,
-        duration: 200,
+        toValue: -width,
+        duration: 250,
         useNativeDriver: true,
       }).start(() => {
-        console.log('First animation completed, updating selected media');
-        // Update to new image
-        setSelectedMedia(nextMediaItem);
+        // Set the new image
         setCurrentIndex(nextIdx);
+        setSelectedMedia(nextItem);
         
-        // Reset position for animation in
-        translateX.setValue(-animationDistance);
+        // Move new image to right edge to prepare for animation
+        translateX.setValue(width);
         
-        // Animate new image in
+        // Animate new image in from the right
         Animated.timing(translateX, {
           toValue: 0,
-          duration: 200,
+          duration: 250,
           useNativeDriver: true,
-        }).start(() => {
-          console.log('Second animation completed, transition finished');
-        });
+        }).start();
+      });
+    }
+  };
+  
+  const navigateToPreviousImageWithAnimation = () => {
+    const actualCurrentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
+    if (actualCurrentIdx > 0) {
+      const prevIdx = actualCurrentIdx - 1;
+      const prevItem = filteredMedia[prevIdx];
+      
+      // Animate current image off screen to the right
+      Animated.timing(translateX, {
+        toValue: width,
+        duration: 250,
+        useNativeDriver: true,
+      }).start(() => {
+        // Set the new image
+        setCurrentIndex(prevIdx);
+        setSelectedMedia(prevItem);
+        
+        // Move new image to left edge to prepare for animation
+        translateX.setValue(-width);
+        
+        // Animate new image in from the left
+        Animated.timing(translateX, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }).start();
       });
     }
   };
@@ -146,37 +151,108 @@ export const GalleryScreen = () => {
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
+        // Reset the animation value when starting the gesture
         translateX.setValue(0);
       },
       onPanResponderMove: (_, gestureState) => {
+        // Update animation value as the finger moves
         translateX.setValue(gestureState.dx);
       },
       onPanResponderRelease: (_, gestureState) => {
         const { dx, vx } = gestureState;
-        console.log('Pan responder release, dx:', dx, 'vx:', vx);
+        console.log('Pan responder release, dx:', dx, 'vx:', vx, 'currentIndex:', currentIndex);
         
-        // If swipe is fast enough or far enough
-        if (Math.abs(dx) > width * 0.3 || Math.abs(vx) > 0.3) {
-          // Swiped left (next image)
-          if (dx < 0) {
-            console.log('Swiped left, trying to go to next image');
-            navigateWithAnimation('next');
-          } 
-          // Swiped right (previous image)
-          else if (dx > 0) {
-            console.log('Swiped right, trying to go to previous image');
-            navigateWithAnimation('previous');
-          }
-        } else {
-          console.log('Not a significant swipe, resetting position');
-          // Not a significant swipe, reset position with spring animation
+        // Calculate the current index in the array to ensure we have the latest
+        const actualCurrentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
+        console.log('Current index in array:', actualCurrentIdx);
+        
+        // Determine if swipe should trigger a navigation action
+        const isSignificantSwipe = Math.abs(dx) > width * 0.2 || Math.abs(vx) > 0.3;
+        const canSwipeLeft = actualCurrentIdx < filteredMedia.length - 1;
+        const canSwipeRight = actualCurrentIdx > 0;
+        
+        // If it's a significant left swipe (next) and we have more images
+        if (isSignificantSwipe && dx < 0 && canSwipeLeft) {
+          console.log('Significant left swipe detected, going to next image');
+          
+          // The target index for the next image
+          const nextIdx = actualCurrentIdx + 1;
+          const nextItem = filteredMedia[nextIdx];
+          
+          // Animate current image off screen to the left
+          Animated.timing(translateX, {
+            toValue: -width,
+            duration: 250,
+            useNativeDriver: true,
+          }).start(() => {
+            // Once current image is off screen, update the image
+            console.log('Changing to next image, index:', nextIdx);
+            setCurrentIndex(nextIdx);
+            setSelectedMedia(nextItem);
+            
+            // Reset position, ready for new image to animate in
+            translateX.setValue(width);
+            
+            // Animate new image in from the right
+            Animated.timing(translateX, {
+              toValue: 0,
+              duration: 250,
+              useNativeDriver: true,
+            }).start();
+          });
+        }
+        // If it's a significant right swipe (previous) and we're not at the first image
+        else if (isSignificantSwipe && dx > 0 && canSwipeRight) {
+          console.log('Significant right swipe detected, going to previous image');
+          
+          // The target index for the previous image
+          const prevIdx = actualCurrentIdx - 1;
+          const prevItem = filteredMedia[prevIdx];
+          
+          // Animate current image off screen to the right
+          Animated.timing(translateX, {
+            toValue: width,
+            duration: 250,
+            useNativeDriver: true,
+          }).start(() => {
+            // Once current image is off screen, update the image
+            console.log('Changing to previous image, index:', prevIdx);
+            setCurrentIndex(prevIdx);
+            setSelectedMedia(prevItem);
+            
+            // Reset position, ready for new image to animate in
+            translateX.setValue(-width);
+            
+            // Animate new image in from the left
+            Animated.timing(translateX, {
+              toValue: 0,
+              duration: 250,
+              useNativeDriver: true,
+            }).start();
+          });
+        }
+        // Not a significant swipe, or can't navigate in that direction
+        else {
+          console.log('Not a significant swipe or cannot navigate further, bouncing back');
+          // Spring back to center
           Animated.spring(translateX, {
             toValue: 0,
+            tension: 50,
+            friction: 7,
             useNativeDriver: true,
-            friction: 5,
           }).start();
         }
+      },
+      onPanResponderTerminate: () => {
+        // If the gesture is terminated unexpectedly, reset animation
+        Animated.spring(translateX, {
+          toValue: 0,
+          tension: 50,
+          friction: 7,
+          useNativeDriver: true,
+        }).start();
       }
     })
   ).current;
@@ -1225,7 +1301,7 @@ export const GalleryScreen = () => {
           {hasPrevious && (
             <TouchableOpacity 
               style={[styles.navButton, styles.prevButton]}
-              onPress={() => navigateWithAnimation('previous')}
+              onPress={navigateToPreviousImageWithAnimation}
             >
               <MaterialIcons name="chevron-left" size={40} color="#fff" />
             </TouchableOpacity>
@@ -1234,7 +1310,7 @@ export const GalleryScreen = () => {
           {hasNext && (
             <TouchableOpacity 
               style={[styles.navButton, styles.nextButton]}
-              onPress={() => navigateWithAnimation('next')}
+              onPress={navigateToNextImageWithAnimation}
             >
               <MaterialIcons name="chevron-right" size={40} color="#fff" />
             </TouchableOpacity>
