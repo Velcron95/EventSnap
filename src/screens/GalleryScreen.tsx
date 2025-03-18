@@ -78,9 +78,17 @@ export const GalleryScreen = () => {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most_likes'>('newest');
   const [filteredMedia, setFilteredMedia] = useState<MediaWithUser[]>([]);
-
+  
+  // Add a ref to keep a stable reference to filtered media during animations
+  const filteredMediaRef = useRef<MediaWithUser[]>([]);
+  
   // Add this for direct swipe handling
   const [imageIndex, setImageIndex] = useState(0);
+  
+  // Ensure the ref is always up to date
+  useEffect(() => {
+    filteredMediaRef.current = filteredMedia;
+  }, [filteredMedia]);
   
   // Create pan responder for swiping images
   const panResponder = useRef(
@@ -123,14 +131,15 @@ export const GalleryScreen = () => {
   
   // Handle left swipe (next image)
   const handleSwipeLeft = () => {
-    console.log(`handleSwipeLeft - filteredMedia length: ${filteredMedia.length}, current index: ${imageIndex}`);
+    const currentFilteredMedia = filteredMediaRef.current;
+    console.log(`handleSwipeLeft - filteredMedia length: ${currentFilteredMedia.length}, current index: ${imageIndex}`);
     
-    if (filteredMedia.length === 0) {
+    if (currentFilteredMedia.length === 0) {
       console.log('No images in filtered media');
       return;
     }
     
-    if (imageIndex >= filteredMedia.length - 1) {
+    if (imageIndex >= currentFilteredMedia.length - 1) {
       console.log('Already at last image, index:', imageIndex);
       // Can't go further, bounce back
       Animated.spring(translateX, {
@@ -152,11 +161,11 @@ export const GalleryScreen = () => {
     }).start(() => {
       // Move to next image
       const nextIndex = imageIndex + 1;
-      console.log('Setting next index:', nextIndex, 'filtered media length:', filteredMedia.length);
+      console.log('Setting next index:', nextIndex, 'filtered media length:', currentFilteredMedia.length);
       
       // Make sure we have a valid next item before setting it
-      if (nextIndex < filteredMedia.length) {
-        const nextItem = filteredMedia[nextIndex];
+      if (nextIndex < currentFilteredMedia.length) {
+        const nextItem = currentFilteredMedia[nextIndex];
         console.log('Next item ID:', nextItem.id);
         
         // Important: update both state values together
@@ -164,7 +173,7 @@ export const GalleryScreen = () => {
         setSelectedMedia(nextItem);
         console.log('Set new selected media:', nextItem.id);
       } else {
-        console.error('Next index out of bounds:', nextIndex, 'max:', filteredMedia.length - 1);
+        console.error('Next index out of bounds:', nextIndex, 'max:', currentFilteredMedia.length - 1);
       }
       
       // Reset position for next image to come in from right
@@ -181,9 +190,10 @@ export const GalleryScreen = () => {
   
   // Handle right swipe (previous image)
   const handleSwipeRight = () => {
-    console.log(`handleSwipeRight - filteredMedia length: ${filteredMedia.length}, current index: ${imageIndex}`);
+    const currentFilteredMedia = filteredMediaRef.current;
+    console.log(`handleSwipeRight - filteredMedia length: ${currentFilteredMedia.length}, current index: ${imageIndex}`);
     
-    if (filteredMedia.length === 0) {
+    if (currentFilteredMedia.length === 0) {
       console.log('No images in filtered media');
       return;
     }
@@ -210,11 +220,11 @@ export const GalleryScreen = () => {
     }).start(() => {
       // Move to previous image
       const prevIndex = imageIndex - 1;
-      console.log('Setting previous index:', prevIndex, 'filtered media length:', filteredMedia.length);
+      console.log('Setting previous index:', prevIndex, 'filtered media length:', currentFilteredMedia.length);
       
       // Make sure we have a valid previous item before setting it
-      if (prevIndex >= 0 && prevIndex < filteredMedia.length) {
-        const prevItem = filteredMedia[prevIndex];
+      if (prevIndex >= 0 && prevIndex < currentFilteredMedia.length) {
+        const prevItem = currentFilteredMedia[prevIndex];
         console.log('Previous item ID:', prevItem.id);
         
         // Important: update both state values together
@@ -239,12 +249,13 @@ export const GalleryScreen = () => {
   
   // Show fullscreen image with our new index tracking
   const showFullScreenImage = (item: MediaWithUser) => {
-    if (filteredMedia.length === 0) {
+    const currentFilteredMedia = filteredMediaRef.current;
+    if (currentFilteredMedia.length === 0) {
       console.error('Cannot show image - filteredMedia is empty');
       return;
     }
     
-    const index = filteredMedia.findIndex(m => m.id === item.id);
+    const index = currentFilteredMedia.findIndex(m => m.id === item.id);
     console.log('showFullScreenImage - Selected index:', index, 'item ID:', item.id);
     
     if (index !== -1) {
@@ -266,16 +277,17 @@ export const GalleryScreen = () => {
   
   // Update the renderFullScreenImage function to use our new handlers
   const renderFullScreenImage = () => {
-    if (!selectedMedia || filteredMedia.length === 0) {
+    const currentFilteredMedia = filteredMediaRef.current;
+    if (!selectedMedia || currentFilteredMedia.length === 0) {
       console.error('Cannot render full screen image - no selected media or empty filteredMedia');
       return null;
     }
     
     // Make sure we have a valid image index
-    if (imageIndex < 0 || imageIndex >= filteredMedia.length) {
-      console.error('Invalid image index:', imageIndex, 'filteredMedia length:', filteredMedia.length);
+    if (imageIndex < 0 || imageIndex >= currentFilteredMedia.length) {
+      console.error('Invalid image index:', imageIndex, 'filteredMedia length:', currentFilteredMedia.length);
       // Try to recover by finding selected media in the array
-      const foundIndex = filteredMedia.findIndex(m => m.id === selectedMedia.id);
+      const foundIndex = currentFilteredMedia.findIndex(m => m.id === selectedMedia.id);
       if (foundIndex !== -1) {
         console.log('Recovered image index:', foundIndex);
         setImageIndex(foundIndex);
@@ -283,7 +295,7 @@ export const GalleryScreen = () => {
     }
     
     const hasPrevious = imageIndex > 0;
-    const hasNext = imageIndex < filteredMedia.length - 1;
+    const hasNext = imageIndex < currentFilteredMedia.length - 1;
     
     console.log('Rendering full screen image -', 
       'index:', imageIndex, 
@@ -335,7 +347,7 @@ export const GalleryScreen = () => {
             </TouchableOpacity>
             
             <Text style={styles.imageCounter}>
-              {imageIndex + 1} / {filteredMedia.length}
+              {imageIndex + 1} / {currentFilteredMedia.length}
             </Text>
           </View>
           
