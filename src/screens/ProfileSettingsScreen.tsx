@@ -23,6 +23,7 @@ import { HeaderBar } from '../components/HeaderBar';
 import { updateUserDisplayNameEverywhere } from '../lib/displayNameUtils';
 import { RootStackParamList } from '../../types';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Toast } from '../components/Toast';
 
 type ProfileScreenNavigationProp = NativeStackNavigationProp<
   RootStackParamList,
@@ -56,6 +57,11 @@ export const ProfileSettingsScreen = () => {
   const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [resetNewPasswordVisible, setResetNewPasswordVisible] = useState(false);
   const [resetConfirmPasswordVisible, setResetConfirmPasswordVisible] = useState(false);
+  
+  // Toast state
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
   
   useEffect(() => {
     if (session?.user) {
@@ -107,13 +113,10 @@ export const ProfileSettingsScreen = () => {
         throw new Error('No user session found');
       }
       
-      setUpdateSuccess(true);
-      setTimeout(() => setUpdateSuccess(false), 3000);
-      
-      Alert.alert(
-        'Success', 
-        'Your profile has been updated successfully. Your new display name will be shown in all events, galleries, and participant lists.'
-      );
+      // Show toast instead of alert
+      setToastMessage('Profile updated successfully');
+      setToastType('success');
+      setToastVisible(true);
     } catch (error) {
       console.error('Unexpected error updating profile:', error);
       Alert.alert('Error', 'An unexpected error occurred');
@@ -693,6 +696,14 @@ export const ProfileSettingsScreen = () => {
       
       {/* Add the password reset modal */}
       {renderResetPasswordModal()}
+      
+      {/* Add Toast component */}
+      <Toast 
+        visible={toastVisible} 
+        message={toastMessage}
+        type={toastType}
+        onClose={() => setToastVisible(false)}
+      />
     </View>
   );
 };

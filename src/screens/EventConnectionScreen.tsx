@@ -23,6 +23,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types';
 import { useEvent } from '../context/EventContext';
 import { HeaderBar } from '../components/HeaderBar';
+import { Toast } from '../components/Toast';
 
 type EventConnectionScreenNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<RootStackParamList, 'EventConnection'>,
@@ -37,6 +38,11 @@ export const EventConnectionScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   
+  // Toast state
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
+  
   // For code modal - keeping this for potential future use
   const [codeModalVisible, setCodeModalVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<any | null>(null);
@@ -46,23 +52,18 @@ export const EventConnectionScreen: React.FC = () => {
     // Set the current event in context
     setCurrentEvent(event);
     
-    // Show success message
-    Alert.alert(
-      'Success',
-      'You have joined the event!',
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            // Navigate to the Events screen
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Events' }],
-            });
-          }
-        }
-      ]
-    );
+    // Show success toast instead of immediate navigation
+    setToastMessage(`Successfully joined ${event.name}`);
+    setToastType('success');
+    setToastVisible(true);
+    
+    // Navigate after a short delay to allow the toast to be seen
+    setTimeout(() => {
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Events' }],
+      });
+    }, 1500);
   };
 
   const handleJoinEvent = async (selectedEventName?: string, selectedEventCode?: string) => {
@@ -247,6 +248,14 @@ export const EventConnectionScreen: React.FC = () => {
             </View>
           </View>
         </Modal>
+
+        {/* Add Toast component */}
+        <Toast 
+          visible={toastVisible} 
+          message={toastMessage}
+          type={toastType}
+          onClose={() => setToastVisible(false)}
+        />
       </KeyboardAvoidingView>
     </View>
   );

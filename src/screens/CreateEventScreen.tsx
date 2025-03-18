@@ -21,6 +21,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { HeaderBar } from '../components/HeaderBar';
+import { Toast } from '../components/Toast';
 
 type CreateEventScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -84,6 +85,11 @@ export const CreateEventScreen = () => {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [generatingCode, setGeneratingCode] = useState(false);
   const navigation = useNavigation<CreateEventScreenNavigationProp>();
+
+  // Add Toast state
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
 
   // Generate a unique event code when the component mounts
   useEffect(() => {
@@ -340,33 +346,9 @@ export const CreateEventScreen = () => {
                 Alert.alert('Warning', 'Event was created but we could not save the background image. Please try again later.');
               } else {
                 console.log('SQL update result:', sqlData);
-                Alert.alert('Success', 'Event created successfully with background image!');
               }
             } else {
               console.log('Event updated successfully with background image:', updatedEvent);
-              
-              // Verify the background_image field was updated
-              if (updatedEvent && updatedEvent.background_image === backgroundImageUrl) {
-                console.log('Background image URL verified in database');
-              } else {
-                console.error('Background image URL mismatch or missing in database response');
-                console.log('Expected:', backgroundImageUrl);
-                console.log('Received:', updatedEvent?.background_image);
-                
-                // Try with a direct SQL query as fallback
-                console.log('Trying direct SQL query to update background_image...');
-                const { data: sqlData, error: sqlError } = await supabase
-                  .rpc('update_event_background', { 
-                    event_id: event.id, 
-                    bg_image_url: backgroundImageUrl 
-                  });
-                  
-                if (sqlError) {
-                  console.error('SQL update error:', sqlError);
-                } else {
-                  console.log('SQL update result:', sqlData);
-                }
-              }
             }
           } catch (updateError: any) {
             console.error('Exception updating event with background image:', updateError);
@@ -394,8 +376,16 @@ export const CreateEventScreen = () => {
 
       console.log('Creator added as participant successfully');
 
-      // Just navigate back without alert
-      navigation.goBack();
+      // After successful event creation
+      setToastMessage('Event created successfully');
+      setToastType('success');
+      setToastVisible(true);
+      
+      // Navigate after a short delay to allow the toast to be seen
+      setTimeout(() => {
+        navigation.goBack();
+      }, 1500);
+      
     } catch (error) {
       console.error('Error creating event:', error);
       Alert.alert('Error', 'Failed to create event: ' + (error as any)?.message || 'Unknown error');
@@ -514,6 +504,14 @@ export const CreateEventScreen = () => {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+      
+      {/* Add Toast component at the end */}
+      <Toast 
+        visible={toastVisible} 
+        message={toastMessage}
+        type={toastType}
+        onClose={() => setToastVisible(false)}
+      />
     </View>
   );
 };
