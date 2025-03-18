@@ -1135,7 +1135,7 @@ export const GalleryScreen = () => {
             
             {/* Filter options */}
             <Text style={styles.modalSectionTitle}>Filter Options</Text>
-            <View style={styles.filterOption}>
+            <View style={styles.modalFilterOption}>
               <Text style={styles.filterOptionText}>Show only my photos</Text>
               <Switch
                 value={showOnlyMyPhotos}
@@ -1302,7 +1302,16 @@ export const GalleryScreen = () => {
     // Check if this media was uploaded by the event creator
     const isCreatorMedia = item.user_id === currentEvent?.created_by;
     
-    // Get the display name to show (only used in full screen view now)
+    // Get current user ID
+    const currentUserId = session?.user?.id;
+    
+    // Check if current user owns this media
+    const isOwnMedia = item.user_id === currentUserId;
+    
+    // User can delete if they're the event creator OR if it's their own photo
+    const canDelete = isCreator || isOwnMedia;
+    
+    // Get the display name to show
     let displayName = 'Unknown User';
     
     // If it's the creator's media, use the creator_display_name from the event
@@ -1315,7 +1324,34 @@ export const GalleryScreen = () => {
     }
     
     if (selectionMode) {
+      // In selection mode, allow selecting but only if user has delete permission
       const isSelected = selectedItems.includes(item.id);
+      
+      // Only allow selection of items user can delete
+      const canSelect = isCreator || isOwnMedia;
+      
+      // If user can't select this item, show it without selection capability
+      if (!canSelect) {
+        return (
+          <TouchableOpacity 
+            style={styles.mediaItem}
+            onPress={() => showFullScreenImage(item)}
+          >
+            <Image 
+              source={{ uri: item.url }} 
+              style={styles.mediaThumbnail}
+              resizeMode="cover"
+            />
+            {item.likes_count > 0 && (
+              <View style={styles.likesCountBadge}>
+                <MaterialIcons name="favorite" size={12} color="#fff" />
+                <Text style={styles.likesCountText}>{item.likes_count}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        );
+      }
+      
       return (
         <TouchableOpacity 
           style={[
@@ -1349,10 +1385,12 @@ export const GalleryScreen = () => {
         style={styles.mediaItem}
         onPress={() => showFullScreenImage(item)}
         onLongPress={() => {
-          console.log('onLongPress triggered, isCreator:', isCreator, 'isCreatorMedia:', isCreatorMedia);
-          // Allow any user to enter selection mode
-          toggleSelectionMode();
-          toggleItemSelection(item.id);
+          console.log('onLongPress triggered, canDelete:', canDelete);
+          // Only allow entering selection mode if user can delete this item
+          if (canDelete) {
+            toggleSelectionMode();
+            toggleItemSelection(item.id);
+          }
         }}
         delayLongPress={500}
       >
@@ -1399,107 +1437,10 @@ export const GalleryScreen = () => {
             <View style={styles.headerActionsContainer}>
               {/* Filter button */}
               <TouchableOpacity
-                style={styles.filterButton}
-                onPress={() => setFilterModalVisible(true)}
-              >
-                <Ionicons name="filter-outline" size={24} color="#333" />
-              </TouchableOpacity>
-              
-              {/* Refresh button */}
-              <TouchableOpacity
                 style={styles.actionButton}
-                onPress={async () => {
-                  console.log('Manual refresh requested');
-                  await refreshCurrentUserDisplayName();
-                  fetchEventMedia();
-                }}
-              >
-                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              
-              {/* Download all button */}
-              {!selectionMode && filteredMedia.length > 0 && (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleDownloadAllPhotos}
-                  disabled={downloadingAll}
-                >
-                  {downloadingAll ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
-                  )}
-                </TouchableOpacity>
-              )}
-              
-              {/* Selection mode buttons */}
-              {selectionMode ? (
-                <>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={toggleSelectionMode}
-                  >
-                    <MaterialIcons name="close" size={24} color="#FFFFFF" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.actionButton, 
-                      styles.deleteButton,
-                      selectedItems.length === 0 && styles.disabledButton
-                    ]}
-                    onPress={deleteSelectedItems}
-                    disabled={selectedItems.length === 0 || multiDeleteInProgress}
-                  >
-                    {multiDeleteInProgress ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <MaterialIcons name="delete" size={24} color="#FFFFFF" />
-                    )}
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={toggleSelectionMode}
-                >
-                  <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-        </View>
-        <LoadingOverlay isVisible={true} message="Loading gallery..." />
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={styles.container}>
-        {/* Modern header with gradient background */}
-        <View style={styles.modernHeader}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity 
-              style={styles.backButtonContainer}
-              onPress={handleBackPress}
-            >
-              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
-            </TouchableOpacity>
-            
-            <View style={styles.titleContainer}>
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
-                {selectionMode && ` • ${selectedItems.length} selected`}
-              </Text>
-            </View>
-            
-            <View style={styles.headerActionsContainer}>
-              {/* Filter button */}
-              <TouchableOpacity
-                style={styles.filterButton}
                 onPress={() => setFilterModalVisible(true)}
               >
-                <Ionicons name="filter-outline" size={24} color="#333" />
+                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
               </TouchableOpacity>
               
               {/* Refresh button */}
@@ -2410,7 +2351,7 @@ const styles = StyleSheet.create({
   sortOptionText: {
     fontSize: 16,
   },
-  filterOption: {
+  modalFilterOption: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
