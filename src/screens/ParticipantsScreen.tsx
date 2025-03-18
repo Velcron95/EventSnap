@@ -553,6 +553,60 @@ export const ParticipantsScreen = React.memo(() => {
     }
   };
 
+  const leaveEvent = async () => {
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const currentUserId = session?.session?.user?.id;
+      
+      if (!currentUserId) {
+        Alert.alert('Error', 'You are not logged in');
+        return;
+      }
+      
+      // Don't allow the creator to leave their own event
+      if (isCreator) {
+        Alert.alert(
+          'Cannot Leave Event',
+          'As the creator, you cannot leave your own event. You can delete the event instead.'
+        );
+        return;
+      }
+      
+      setRemoving(true);
+      
+      // Delete the participant record
+      const { error: deleteError } = await supabase
+        .from('event_participants')
+        .delete()
+        .eq('event_id', eventId)
+        .eq('user_id', currentUserId);
+      
+      if (deleteError) {
+        console.error('Error leaving event:', deleteError);
+        Alert.alert('Error', 'Failed to leave event. Please try again.');
+      } else {
+        // Success, navigate back to events screen without showing alert
+        navigation.navigate('Events');
+      }
+    } catch (error) {
+      console.error('Unexpected error leaving event:', error);
+      Alert.alert('Error', 'An unexpected error occurred');
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const handleLeaveEventPress = () => {
+    Alert.alert(
+      'Leave Event',
+      'Are you sure you want to leave this event? You will no longer have access to photos or participants.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: leaveEvent }
+      ]
+    );
+  };
+
   const handleDeleteEventPress = () => {
     Alert.alert(
       'Delete Event',
@@ -883,9 +937,10 @@ export const ParticipantsScreen = React.memo(() => {
             >
               <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
+            <Text style={styles.eventName} numberOfLines={1}>{eventName}</Text>
           </View>
           <View style={styles.eventActions}>
-            {isCreator && (
+            {isCreator ? (
               <>
                 <Text style={styles.creatorBadge}>Creator</Text>
                 <TouchableOpacity 
@@ -895,6 +950,22 @@ export const ParticipantsScreen = React.memo(() => {
                   <MaterialIcons name="key" size={24} color="#FFFFFF" />
                 </TouchableOpacity>
               </>
+            ) : (
+              // Add Leave Event button for non-creators
+              <TouchableOpacity 
+                style={styles.leaveEventButton}
+                onPress={handleLeaveEventPress}
+                disabled={removing}
+              >
+                {removing ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <MaterialIcons name="exit-to-app" size={18} color="#FFFFFF" />
+                    <Text style={styles.leaveEventText}>Leave Event</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             )}
           </View>
         </View>
@@ -1512,5 +1583,20 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
+  },
+  leaveEventButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginLeft: 8,
+  },
+  leaveEventText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginLeft: 5,
   },
 }); 

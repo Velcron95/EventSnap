@@ -766,51 +766,27 @@ export const GalleryScreen = () => {
     );
   };
 
-  // Completely rewritten navigation with improved smooth animation
+  // Replace the navigateToNextImage function with this simpler version without animation
   const navigateToNextImage = () => {
     console.log('Navigating to next image, current index:', imageIndex);
     if (imageIndex < filteredMedia.length - 1) {
-      // Set direction for animation
       const newIndex = imageIndex + 1;
-      
-      // Animate current image off-screen to the left
-      Animated.timing(translateX, {
-        toValue: -width,
-        duration: 300, // Slower animation (300ms)
-        useNativeDriver: true,
-        easing: Easing.out(Easing.ease), // Add easing function for smoother animation
-      }).start(() => {
-        // After animation completes, update the state and reset animation
-        setImageIndex(newIndex);
-        setSelectedMedia(filteredMedia[newIndex]);
-        translateX.setValue(0); // Reset position
-      });
+      setImageIndex(newIndex);
+      setSelectedMedia(filteredMedia[newIndex]);
     }
   };
-  
-  // Completely rewritten navigation with improved smooth animation
+
+  // Replace the navigateToPreviousImage function with this simpler version without animation
   const navigateToPreviousImage = () => {
     console.log('Navigating to previous image, current index:', imageIndex);
     if (imageIndex > 0) {
-      // Set direction for animation
       const newIndex = imageIndex - 1;
-      
-      // Animate current image off-screen to the right
-      Animated.timing(translateX, {
-        toValue: width,
-        duration: 300, // Slower animation (300ms)
-        useNativeDriver: true,
-        easing: Easing.out(Easing.ease), // Add easing function for smoother animation
-      }).start(() => {
-        // After animation completes, update the state and reset animation
-        setImageIndex(newIndex);
-        setSelectedMedia(filteredMedia[newIndex]);
-        translateX.setValue(0); // Reset position
-      });
+      setImageIndex(newIndex);
+      setSelectedMedia(filteredMedia[newIndex]);
     }
   };
-  
-  // Show fullscreen image with our new index tracking
+
+  // Update the showFullScreenImage function to remove animation reset
   const showFullScreenImage = (item: MediaWithUser) => {
     if (filteredMedia.length === 0) {
       console.error('Cannot show image - filteredMedia is empty');
@@ -821,9 +797,6 @@ export const GalleryScreen = () => {
     console.log('showFullScreenImage - Selected index:', index, 'item ID:', item.id);
     
     if (index !== -1) {
-      // Reset the animation position
-      translateX.setValue(0);
-      
       setImageIndex(index);
       setSelectedMedia(item);
       setFullScreenVisible(true);
@@ -832,14 +805,14 @@ export const GalleryScreen = () => {
       console.error('Cannot find selected media (ID:', item.id, ') in filteredMedia array');
     }
   };
-  
+
   // Close fullscreen image
   const closeFullScreenImage = () => {
     setFullScreenVisible(false);
     setSelectedMedia(null);
     setHeaderVisible(true);
   };
-  
+
   // Update the renderFullScreenImage function to only allow owners to delete their photos
   const renderFullScreenImage = () => {
     if (!selectedMedia || filteredMedia.length === 0) {
@@ -878,18 +851,14 @@ export const GalleryScreen = () => {
       <View style={styles.fullScreenContainer}>
         <StatusBar hidden />
         
-        <Animated.View 
-          style={[
-            styles.fullScreenImageContainer,
-            { transform: [{ translateX }] }
-          ]}
-        >
+        <View style={[styles.fullScreenImageContainer, { backgroundColor: 'black' }]}>
           <Image 
             source={{ uri: selectedMedia.url }} 
             style={styles.fullScreenImage}
             resizeMode="contain"
+            fadeDuration={100}
           />
-        </Animated.View>
+        </View>
         
         <View style={styles.fullScreenOverlay}>
           <View style={styles.fullScreenHeader}>
@@ -909,8 +878,6 @@ export const GalleryScreen = () => {
             <View style={styles.mediaInfo}>
               <Text style={styles.mediaInfoText}>
                 By: {displayName}
-                {isCreatorMedia && <Text style={styles.creatorTag}> (Creator)</Text>}
-                {isOwnMedia && <Text style={styles.ownPhotoTag}> (You)</Text>}
               </Text>
               <Text style={styles.mediaInfoDate}>
                 {new Date(selectedMedia.created_at).toLocaleString()}
@@ -1103,7 +1070,7 @@ export const GalleryScreen = () => {
   const renderFilterModal = () => {
     return (
       <Modal
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         visible={filterModalVisible}
         onRequestClose={() => setFilterModalVisible(false)}

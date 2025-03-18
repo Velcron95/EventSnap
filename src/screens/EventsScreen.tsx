@@ -380,7 +380,11 @@ export const EventsScreen = () => {
   return (
     <View style={styles.container}>
       <HeaderBar />
-      <ScrollView style={styles.scrollView}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Main Action Buttons */}
         <View style={styles.actionButtonsContainer}>
           <TouchableOpacity
@@ -494,6 +498,7 @@ const styles = StyleSheet.create({
   },
   sectionContainer: {
     padding: 16,
+    marginBottom: 24,
   },
   sectionTitle: {
     fontSize: 20,
@@ -551,5 +556,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+  },
+  scrollContent: {
+    paddingBottom: 100,
   },
 }); 
