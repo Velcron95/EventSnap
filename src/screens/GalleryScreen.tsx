@@ -797,7 +797,7 @@ export const GalleryScreen = () => {
         return Math.abs(gestureState.dx) > 5;
       },
       onPanResponderGrant: () => {
-        // Nothing to do on grant
+        // Nothing needed on grant
       },
       onPanResponderMove: (_, gestureState) => {
         // Just move with the finger
@@ -809,76 +809,17 @@ export const GalleryScreen = () => {
         // If it's a significant swipe (more than 20% of screen width)
         if (Math.abs(dx) > width * 0.2) {
           if (dx < 0) {
-            // Swiped left - go to next image
-            const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
-            if (currentIdx < filteredMedia.length - 1) {
-              // Complete the swipe left animation
-              Animated.timing(translateX, {
-                toValue: -width,
-                duration: 150,
-                useNativeDriver: true
-              }).start(() => {
-                const nextIdx = currentIdx + 1;
-                // Update to the next image
-                setSelectedMedia(filteredMedia[nextIdx]);
-                setImageIndex(nextIdx);
-                
-                // Reset position for animating in
-                translateX.setValue(width);
-                
-                // Animate in from right
-                Animated.timing(translateX, {
-                  toValue: 0,
-                  duration: 150,
-                  useNativeDriver: true
-                }).start();
-              });
-            } else {
-              // Can't go further, bounce back
-              Animated.spring(translateX, {
-                toValue: 0,
-                friction: 5,
-                tension: 40,
-                useNativeDriver: true
-              }).start();
-            }
+            // Swipe left - explicitly call the same function as the next button
+            console.log('Swipe detected: LEFT - calling navigateToNextImage()');
+            navigateToNextImage();
           } else {
-            // Swiped right - go to previous image
-            const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
-            if (currentIdx > 0) {
-              // Complete the swipe right animation
-              Animated.timing(translateX, {
-                toValue: width,
-                duration: 150,
-                useNativeDriver: true
-              }).start(() => {
-                const prevIdx = currentIdx - 1;
-                // Update to the previous image
-                setSelectedMedia(filteredMedia[prevIdx]);
-                setImageIndex(prevIdx);
-                
-                // Reset position for animating in
-                translateX.setValue(-width);
-                
-                // Animate in from left
-                Animated.timing(translateX, {
-                  toValue: 0,
-                  duration: 150,
-                  useNativeDriver: true
-                }).start();
-              });
-            } else {
-              // Can't go further, bounce back
-              Animated.spring(translateX, {
-                toValue: 0,
-                friction: 5,
-                tension: 40,
-                useNativeDriver: true
-              }).start();
-            }
+            // Swipe right - explicitly call the same function as the previous button
+            console.log('Swipe detected: RIGHT - calling navigateToPreviousImage()');
+            navigateToPreviousImage();
           }
         } else {
           // Not a significant swipe, bounce back to center
+          console.log('Swipe not significant enough, bouncing back');
           Animated.spring(translateX, {
             toValue: 0,
             friction: 5,
