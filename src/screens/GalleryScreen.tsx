@@ -123,6 +123,8 @@ export const GalleryScreen = () => {
   
   // Handle left swipe (next image)
   const handleSwipeLeft = () => {
+    console.log(`handleSwipeLeft - filteredMedia length: ${filteredMedia.length}, current index: ${imageIndex}`);
+    
     if (filteredMedia.length === 0) {
       console.log('No images in filtered media');
       return;
@@ -150,13 +152,19 @@ export const GalleryScreen = () => {
     }).start(() => {
       // Move to next image
       const nextIndex = imageIndex + 1;
-      console.log('Setting next index:', nextIndex);
+      console.log('Setting next index:', nextIndex, 'filtered media length:', filteredMedia.length);
       
-      // Important: update both state values together
-      setImageIndex(nextIndex);
-      if (filteredMedia[nextIndex]) {
-        setSelectedMedia(filteredMedia[nextIndex]);
-        console.log('Set new selected media:', filteredMedia[nextIndex].id);
+      // Make sure we have a valid next item before setting it
+      if (nextIndex < filteredMedia.length) {
+        const nextItem = filteredMedia[nextIndex];
+        console.log('Next item ID:', nextItem.id);
+        
+        // Important: update both state values together
+        setImageIndex(nextIndex);
+        setSelectedMedia(nextItem);
+        console.log('Set new selected media:', nextItem.id);
+      } else {
+        console.error('Next index out of bounds:', nextIndex, 'max:', filteredMedia.length - 1);
       }
       
       // Reset position for next image to come in from right
@@ -173,6 +181,8 @@ export const GalleryScreen = () => {
   
   // Handle right swipe (previous image)
   const handleSwipeRight = () => {
+    console.log(`handleSwipeRight - filteredMedia length: ${filteredMedia.length}, current index: ${imageIndex}`);
+    
     if (filteredMedia.length === 0) {
       console.log('No images in filtered media');
       return;
@@ -200,13 +210,19 @@ export const GalleryScreen = () => {
     }).start(() => {
       // Move to previous image
       const prevIndex = imageIndex - 1;
-      console.log('Setting previous index:', prevIndex);
+      console.log('Setting previous index:', prevIndex, 'filtered media length:', filteredMedia.length);
       
-      // Important: update both state values together
-      setImageIndex(prevIndex);
-      if (filteredMedia[prevIndex]) {
-        setSelectedMedia(filteredMedia[prevIndex]);
-        console.log('Set new selected media:', filteredMedia[prevIndex].id);
+      // Make sure we have a valid previous item before setting it
+      if (prevIndex >= 0 && prevIndex < filteredMedia.length) {
+        const prevItem = filteredMedia[prevIndex];
+        console.log('Previous item ID:', prevItem.id);
+        
+        // Important: update both state values together
+        setImageIndex(prevIndex);
+        setSelectedMedia(prevItem);
+        console.log('Set new selected media:', prevItem.id);
+      } else {
+        console.error('Previous index out of bounds:', prevIndex);
       }
       
       // Reset position for previous image to come in from left
@@ -223,8 +239,13 @@ export const GalleryScreen = () => {
   
   // Show fullscreen image with our new index tracking
   const showFullScreenImage = (item: MediaWithUser) => {
+    if (filteredMedia.length === 0) {
+      console.error('Cannot show image - filteredMedia is empty');
+      return;
+    }
+    
     const index = filteredMedia.findIndex(m => m.id === item.id);
-    console.log('showFullScreenImage - Selected index:', index);
+    console.log('showFullScreenImage - Selected index:', index, 'item ID:', item.id);
     
     if (index !== -1) {
       setImageIndex(index);
@@ -232,7 +253,7 @@ export const GalleryScreen = () => {
       setFullScreenVisible(true);
       setHeaderVisible(false);
     } else {
-      console.error('Cannot find selected media in filteredMedia array');
+      console.error('Cannot find selected media (ID:', item.id, ') in filteredMedia array');
     }
   };
   
@@ -245,10 +266,31 @@ export const GalleryScreen = () => {
   
   // Update the renderFullScreenImage function to use our new handlers
   const renderFullScreenImage = () => {
-    if (!selectedMedia || filteredMedia.length === 0) return null;
+    if (!selectedMedia || filteredMedia.length === 0) {
+      console.error('Cannot render full screen image - no selected media or empty filteredMedia');
+      return null;
+    }
+    
+    // Make sure we have a valid image index
+    if (imageIndex < 0 || imageIndex >= filteredMedia.length) {
+      console.error('Invalid image index:', imageIndex, 'filteredMedia length:', filteredMedia.length);
+      // Try to recover by finding selected media in the array
+      const foundIndex = filteredMedia.findIndex(m => m.id === selectedMedia.id);
+      if (foundIndex !== -1) {
+        console.log('Recovered image index:', foundIndex);
+        setImageIndex(foundIndex);
+      }
+    }
     
     const hasPrevious = imageIndex > 0;
     const hasNext = imageIndex < filteredMedia.length - 1;
+    
+    console.log('Rendering full screen image -', 
+      'index:', imageIndex, 
+      'hasPrevious:', hasPrevious, 
+      'hasNext:', hasNext, 
+      'image ID:', selectedMedia.id
+    );
     
     // Check if this media was uploaded by the event creator
     const isCreatorMedia = selectedMedia.user_id === currentEvent?.created_by;
@@ -356,6 +398,7 @@ export const GalleryScreen = () => {
             <TouchableOpacity 
               style={[styles.navButton, styles.prevButton]}
               onPress={handleSwipeRight}
+              hitSlop={{ top: 30, bottom: 30, left: 30, right: 30 }}
             >
               <MaterialIcons name="chevron-left" size={40} color="#fff" />
             </TouchableOpacity>
@@ -365,6 +408,7 @@ export const GalleryScreen = () => {
             <TouchableOpacity 
               style={[styles.navButton, styles.nextButton]}
               onPress={handleSwipeLeft}
+              hitSlop={{ top: 30, bottom: 30, left: 30, right: 30 }}
             >
               <MaterialIcons name="chevron-right" size={40} color="#fff" />
             </TouchableOpacity>
@@ -1333,9 +1377,12 @@ export const GalleryScreen = () => {
     navigation.navigate('Events');
   };
 
-  // Add useEffect to apply filters when media or sortBy changes
+  // Update useEffect to apply filters when media or sortBy changes
   useEffect(() => {
+    console.log(`Filtering media: ${media.length} items available, sort by: ${sortBy}`);
+    
     if (media.length === 0) {
+      console.log('No media to filter, setting empty filteredMedia');
       setFilteredMedia([]);
       return;
     }
@@ -1358,8 +1405,14 @@ export const GalleryScreen = () => {
         break;
     }
     
+    console.log(`Setting filteredMedia with ${sorted.length} items`);
     setFilteredMedia(sorted);
   }, [media, sortBy]);
+
+  // Add a new useEffect to debug filteredMedia
+  useEffect(() => {
+    console.log(`FilteredMedia updated: ${filteredMedia.length} items`);
+  }, [filteredMedia]);
 
   // Add function to toggle filter modal
   const toggleFilterModal = () => {
