@@ -79,6 +79,65 @@ export const GalleryScreen = () => {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most_likes'>('newest');
   const [filteredMedia, setFilteredMedia] = useState<MediaWithUser[]>([]);
 
+  // More direct approach to navigate with animation
+  const navigateWithAnimation = (direction: 'next' | 'previous') => {
+    const isNext = direction === 'next';
+    const animationDistance = isNext ? -width : width;
+    
+    // Find the correct next/previous media item
+    const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
+    if (isNext && currentIdx < filteredMedia.length - 1) {
+      const nextIdx = currentIdx + 1;
+      const nextMedia = filteredMedia[nextIdx];
+      
+      // First animate current image out
+      Animated.timing(translateX, {
+        toValue: animationDistance,
+        duration: 250,
+        useNativeDriver: true,
+      }).start(() => {
+        // Update to new image
+        setCurrentIndex(nextIdx);
+        setSelectedMedia(nextMedia);
+        
+        // Reset position for animation in
+        translateX.setValue(-animationDistance);
+        
+        // Animate new image in
+        Animated.timing(translateX, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }).start();
+      });
+      
+    } else if (!isNext && currentIdx > 0) {
+      const prevIdx = currentIdx - 1;
+      const prevMedia = filteredMedia[prevIdx];
+      
+      // First animate current image out
+      Animated.timing(translateX, {
+        toValue: animationDistance,
+        duration: 250,
+        useNativeDriver: true,
+      }).start(() => {
+        // Update to new image
+        setCurrentIndex(prevIdx);
+        setSelectedMedia(prevMedia);
+        
+        // Reset position for animation in
+        translateX.setValue(-animationDistance);
+        
+        // Animate new image in
+        Animated.timing(translateX, {
+          toValue: 0,
+          duration: 250,
+          useNativeDriver: true,
+        }).start();
+      });
+    }
+  };
+
   // Create pan responder for swiping images
   const panResponder = useRef(
     PanResponder.create({
@@ -96,74 +155,32 @@ export const GalleryScreen = () => {
         if (Math.abs(dx) > width * 0.3 || Math.abs(vx) > 0.3) {
           // Swiped left (next image)
           if (dx < 0 && currentIndex < filteredMedia.length - 1) {
-            animateSwipe(-width, () => {
-              const nextIdx = currentIndex + 1;
-              const nextMedia = filteredMedia[nextIdx];
-              setCurrentIndex(nextIdx);
-              setSelectedMedia(nextMedia);
-              resetPosition('right');
-            });
+            navigateWithAnimation('next');
           } 
           // Swiped right (previous image)
           else if (dx > 0 && currentIndex > 0) {
-            animateSwipe(width, () => {
-              const prevIdx = currentIndex - 1;
-              const prevMedia = filteredMedia[prevIdx];
-              setCurrentIndex(prevIdx);
-              setSelectedMedia(prevMedia);
-              resetPosition('left');
-            });
+            navigateWithAnimation('previous');
           } 
           // Can't swipe in this direction
           else {
-            resetPosition();
+            // Reset position - bounce back
+            Animated.spring(translateX, {
+              toValue: 0,
+              useNativeDriver: true,
+              friction: 5,
+            }).start();
           }
         } else {
-          // Not a significant swipe, reset position
-          resetPosition();
+          // Not a significant swipe, reset position with spring animation
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 5,
+          }).start();
         }
       }
     })
   ).current;
-
-  // Function to animate the swipe
-  const animateSwipe = (toValue: number, callback?: () => void) => {
-    Animated.parallel([
-      Animated.timing(translateX, {
-        toValue,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: true,
-      })
-    ]).start(callback);
-  };
-
-  // Function to reset position
-  const resetPosition = (fromDirection?: 'left' | 'right') => {
-    if (fromDirection) {
-      // Set initial position before resetting
-      translateX.setValue(fromDirection === 'left' ? -width : width);
-      opacity.setValue(0);
-    }
-    
-    // Animate back to center
-    Animated.parallel([
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 250,
-        useNativeDriver: true,
-      })
-    ]).start();
-  };
 
   // Add a debug effect to check isCreator
   useEffect(() => {
@@ -1121,7 +1138,7 @@ export const GalleryScreen = () => {
         <Animated.View 
           style={[
             styles.fullScreenImageContainer,
-            { transform: [{ translateX }], opacity }
+            { transform: [{ translateX }] }
           ]}
           {...panResponder.panHandlers}
         >
@@ -1204,12 +1221,7 @@ export const GalleryScreen = () => {
           {hasPrevious && (
             <TouchableOpacity 
               style={[styles.navButton, styles.prevButton]}
-              onPress={() => {
-                animateSwipe(width, () => {
-                  navigateToPreviousImage();
-                  resetPosition('left');
-                });
-              }}
+              onPress={() => navigateWithAnimation('previous')}
             >
               <MaterialIcons name="chevron-left" size={40} color="#fff" />
             </TouchableOpacity>
@@ -1218,12 +1230,7 @@ export const GalleryScreen = () => {
           {hasNext && (
             <TouchableOpacity 
               style={[styles.navButton, styles.nextButton]}
-              onPress={() => {
-                animateSwipe(-width, () => {
-                  navigateToNextImage();
-                  resetPosition('right');
-                });
-              }}
+              onPress={() => navigateWithAnimation('next')}
             >
               <MaterialIcons name="chevron-right" size={40} color="#fff" />
             </TouchableOpacity>
