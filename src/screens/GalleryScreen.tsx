@@ -1620,6 +1620,70 @@ export const GalleryScreen = () => {
               >
                 <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
               </TouchableOpacity>
+              
+              {/* Refresh button */}
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={async () => {
+                  console.log('Manual refresh requested');
+                  await refreshCurrentUserDisplayName();
+                  fetchEventMedia();
+                }}
+              >
+                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+              
+              {/* Download all button */}
+              {!selectionMode && filteredMedia.length > 0 && (
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={handleDownloadAllPhotos}
+                  disabled={downloadingAll}
+                >
+                  {downloadingAll ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
+                  )}
+                </TouchableOpacity>
+              )}
+              
+              {/* Selection mode buttons - only show if user is creator or has their own photos */}
+              {selectionMode ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={toggleSelectionMode}
+                  >
+                    <MaterialIcons name="close" size={24} color="#FFFFFF" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.actionButton, 
+                      styles.deleteButton,
+                      selectedItems.length === 0 && styles.disabledButton
+                    ]}
+                    onPress={deleteSelectedItems}
+                    disabled={selectedItems.length === 0 || multiDeleteInProgress}
+                  >
+                    {multiDeleteInProgress ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <MaterialIcons name="delete" size={24} color="#FFFFFF" />
+                    )}
+                  </TouchableOpacity>
+                </>
+              ) : (
+                /* Only show select button for users who can delete photos (creators or users with their own photos) */
+                (isCreator || userHasDeletablePhotos) && (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={toggleSelectionMode}
+                  >
+                    <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
+                  </TouchableOpacity>
+                )
+              )}
             </View>
           </View>
         </View>
