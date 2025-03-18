@@ -8,7 +8,7 @@ import {
   Platform,
   StatusBar
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useEvent } from '../context/EventContext';
@@ -18,16 +18,22 @@ import { colors, typography, spacing } from '../styles/theme';
 interface HeaderBarProps {
   title?: string;
   rightComponent?: React.ReactNode;
+  forceTitle?: string;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({ 
   title,
-  rightComponent
+  rightComponent,
+  forceTitle
 }) => {
   const navigation = useNavigation();
+  const route = useRoute();
   const { session } = useAuth();
   const { currentEvent } = useEvent();
   const [userDisplayName, setUserDisplayName] = useState<string>('');
+  
+  // Determine if this is the events screen (main screen)
+  const isEventsScreen = route.name === 'Events';
   
   useEffect(() => {
     if (session?.user) {
@@ -44,7 +50,6 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         .single();
         
       if (error) {
-        console.error('Error fetching user profile:', error);
         return;
       }
       
@@ -52,7 +57,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         setUserDisplayName(data.display_name);
       }
     } catch (error) {
-      console.error('Unexpected error fetching user profile:', error);
+      // Handle silently
     }
   };
   
@@ -85,7 +90,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 resizeMode="contain"
               />
               <Text style={styles.appName} numberOfLines={1}>
-                {currentEvent?.name || 'EventSnap'}
+                {isEventsScreen 
+                  ? 'EventSnap' 
+                  : (forceTitle || currentEvent?.name || 'EventSnap')}
               </Text>
             </>
           )}
