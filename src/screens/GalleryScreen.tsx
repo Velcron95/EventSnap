@@ -720,7 +720,7 @@ export const GalleryScreen = () => {
     );
   };
 
-  // Completely rewritten navigateToNextImage function with direct state updates
+  // Complete rewrite of navigation functions with a direct, non-animated approach
   const navigateToNextImage = () => {
     if (!selectedMedia || filteredMedia.length <= 1) return;
     
@@ -731,23 +731,14 @@ export const GalleryScreen = () => {
     const nextIdx = currentIdx + 1;
     const nextMedia = filteredMedia[nextIdx];
     
-    // Update states immediately before animation
+    console.log(`DIRECT NAV - Moving from index ${currentIdx} to ${nextIdx}`);
+    
+    // First perform the state updates
     setImageIndex(nextIdx);
     setSelectedMedia(nextMedia);
-    
-    // Reset animation position to start from left
-    translateX.setValue(width);
-    
-    // Animate to center
-    Animated.spring(translateX, {
-      toValue: 0,
-      friction: 6,
-      tension: 40,
-      useNativeDriver: true
-    }).start();
   };
   
-  // Completely rewritten navigateToPreviousImage function with direct state updates
+  // Complete rewrite of navigation functions with a direct, non-animated approach
   const navigateToPreviousImage = () => {
     if (!selectedMedia || filteredMedia.length <= 1) return;
     
@@ -758,20 +749,11 @@ export const GalleryScreen = () => {
     const prevIdx = currentIdx - 1;
     const prevMedia = filteredMedia[prevIdx];
     
-    // Update states immediately before animation
+    console.log(`DIRECT NAV - Moving from index ${currentIdx} to ${prevIdx}`);
+    
+    // First perform the state updates
     setImageIndex(prevIdx);
     setSelectedMedia(prevMedia);
-    
-    // Reset animation position to start from right
-    translateX.setValue(-width);
-    
-    // Animate to center
-    Animated.spring(translateX, {
-      toValue: 0,
-      friction: 6,
-      tension: 40,
-      useNativeDriver: true
-    }).start();
   };
   
   // Create a simpler pan responder for swiping
@@ -782,7 +764,8 @@ export const GalleryScreen = () => {
         return Math.abs(gestureState.dx) > 5;
       },
       onPanResponderGrant: () => {
-        // Do nothing on grant, keep the current position
+        // Reset animation value
+        translateX.setValue(0);
       },
       onPanResponderMove: (_, gestureState) => {
         // Update the position as the user swipes
@@ -794,19 +777,16 @@ export const GalleryScreen = () => {
         // Determine if the swipe was significant enough to trigger navigation
         if (Math.abs(dx) > width * 0.2) {
           if (dx < 0) {
-            // Swipe left, go to next image
+            // Check if there's a next image
             const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
             const hasNext = currentIdx < filteredMedia.length - 1;
             
             if (hasNext) {
-              // First complete the swipe animation
-              Animated.timing(translateX, {
-                toValue: -width,
-                duration: 200,
-                useNativeDriver: true
-              }).start(() => {
-                navigateToNextImage();
-              });
+              // Navigate to next image directly
+              navigateToNextImage();
+              
+              // Reset position
+              translateX.setValue(0);
             } else {
               // Bounce back if no next image
               Animated.spring(translateX, {
@@ -817,19 +797,16 @@ export const GalleryScreen = () => {
               }).start();
             }
           } else {
-            // Swipe right, go to previous image
+            // Check if there's a previous image
             const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
             const hasPrevious = currentIdx > 0;
             
             if (hasPrevious) {
-              // First complete the swipe animation
-              Animated.timing(translateX, {
-                toValue: width,
-                duration: 200,
-                useNativeDriver: true
-              }).start(() => {
-                navigateToPreviousImage();
-              });
+              // Navigate to previous image directly
+              navigateToPreviousImage();
+              
+              // Reset position
+              translateX.setValue(0);
             } else {
               // Bounce back if no previous image
               Animated.spring(translateX, {
