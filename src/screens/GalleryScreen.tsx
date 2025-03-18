@@ -66,6 +66,10 @@ export const GalleryScreen = () => {
   // Add state to track if HeaderBar should be visible
   const [headerVisible, setHeaderVisible] = useState(true);
 
+  // Swipe animation state
+  const translateX = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+
   // Get event ID from route params or context
   const eventId = route.params?.eventId || currentEvent?.id;
   const eventName = route.params?.eventName || currentEvent?.name;
@@ -74,6 +78,86 @@ export const GalleryScreen = () => {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most_likes'>('newest');
   const [filteredMedia, setFilteredMedia] = useState<MediaWithUser[]>([]);
+
+  // Create pan responder for swiping images
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        translateX.setValue(0);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        translateX.setValue(gestureState.dx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const { dx, vx } = gestureState;
+        
+        // If swipe is fast enough or far enough
+        if (Math.abs(dx) > width * 0.3 || Math.abs(vx) > 0.3) {
+          // Swiped left
+          if (dx < 0 && currentIndex < media.length - 1) {
+            animateSwipe(-width, () => {
+              navigateToNextImage();
+              resetPosition('right');
+            });
+          } 
+          // Swiped right
+          else if (dx > 0 && currentIndex > 0) {
+            animateSwipe(width, () => {
+              navigateToPreviousImage();
+              resetPosition('left');
+            });
+          } 
+          // Can't swipe in this direction
+          else {
+            resetPosition();
+          }
+        } else {
+          // Not a significant swipe, reset position
+          resetPosition();
+        }
+      }
+    })
+  ).current;
+
+  // Function to animate the swipe
+  const animateSwipe = (toValue: number, callback?: () => void) => {
+    Animated.parallel([
+      Animated.timing(translateX, {
+        toValue,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      })
+    ]).start(callback);
+  };
+
+  // Function to reset position
+  const resetPosition = (fromDirection?: 'left' | 'right') => {
+    if (fromDirection) {
+      // Set initial position before resetting
+      translateX.setValue(fromDirection === 'left' ? -width : width);
+      opacity.setValue(0);
+    }
+    
+    // Animate back to center
+    Animated.parallel([
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      })
+    ]).start();
+  };
 
   // Add a debug effect to check isCreator
   useEffect(() => {
@@ -986,7 +1070,7 @@ export const GalleryScreen = () => {
     );
   };
 
-  // Update the renderFullScreenImage function to properly display user names
+  // Update the renderFullScreenImage function to use Animated and PanResponder
   const renderFullScreenImage = () => {
     if (!selectedMedia) return null;
     
@@ -1028,13 +1112,19 @@ export const GalleryScreen = () => {
       <View style={styles.fullScreenContainer}>
         <StatusBar hidden />
         
-        <View style={styles.fullScreenImageContainer}>
+        <Animated.View 
+          style={[
+            styles.fullScreenImageContainer,
+            { transform: [{ translateX }], opacity }
+          ]}
+          {...panResponder.panHandlers}
+        >
           <Image 
             source={{ uri: selectedMedia.url }} 
             style={styles.fullScreenImage}
             resizeMode="contain"
           />
-        </View>
+        </Animated.View>
         
         <View style={styles.fullScreenOverlay}>
           <View style={styles.fullScreenHeader}>
@@ -1108,7 +1198,12 @@ export const GalleryScreen = () => {
           {hasPrevious && (
             <TouchableOpacity 
               style={[styles.navButton, styles.prevButton]}
-              onPress={navigateToPreviousImage}
+              onPress={() => {
+                animateSwipe(width, () => {
+                  navigateToPreviousImage();
+                  resetPosition('left');
+                });
+              }}
             >
               <MaterialIcons name="chevron-left" size={40} color="#fff" />
             </TouchableOpacity>
@@ -1117,7 +1212,12 @@ export const GalleryScreen = () => {
           {hasNext && (
             <TouchableOpacity 
               style={[styles.navButton, styles.nextButton]}
-              onPress={navigateToNextImage}
+              onPress={() => {
+                animateSwipe(-width, () => {
+                  navigateToNextImage();
+                  resetPosition('right');
+                });
+              }}
             >
               <MaterialIcons name="chevron-right" size={40} color="#fff" />
             </TouchableOpacity>
