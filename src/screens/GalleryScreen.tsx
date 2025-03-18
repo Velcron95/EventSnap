@@ -1169,6 +1169,225 @@ export const GalleryScreen = () => {
     );
   };
 
+  // Add this function to show a user-friendly alert about the missing table
+  const showMediaLikesTableMissingAlert = () => {
+    Alert.alert(
+      'Likes Feature Not Available',
+      'The likes feature is not available yet. Please contact the app administrator to enable this feature.',
+      [
+        {
+          text: 'OK',
+          style: 'default'
+        }
+      ]
+    );
+  };
+
+  // Add the missing handleLikeMedia function
+  const handleLikeMedia = async (mediaItem: MediaWithUser) => {
+    if (likingInProgress) return;
+    
+    try {
+      setLikingInProgress(true);
+      
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Error', 'You must be logged in to like media');
+        return;
+      }
+      
+      // Check if media_likes table exists, create it if it doesn't
+      try {
+        console.log('Checking if media_likes table exists...');
+        // Try to create the table if it doesn't exist
+        const { error: createTableError } = await supabase.rpc('create_media_likes_table_if_not_exists');
+        
+        if (createTableError) {
+          console.log('Error calling RPC function, trying direct SQL:', createTableError);
+          
+          // If RPC fails, try direct SQL (requires admin privileges)
+          const { error: sqlError } = await supabase.from('_temp_create_table').select('*').limit(1);
+          console.log('SQL check result:', sqlError ? 'Error' : 'Success');
+          
+          // If we can't create the table, we'll just try to use it anyway
+          // The user might need to ask the admin to create the table
+        }
+      } catch (tableCheckError) {
+        console.error('Error checking/creating table:', tableCheckError);
+      }
+      
+      if (mediaItem.user_has_liked) {
+        // Unlike the media
+        console.log('Unliking media:', mediaItem.id);
+        const { error } = await supabase
+          .from('media_likes')
+          .delete()
+          .eq('media_id', mediaItem.id)
+          .eq('user_id', user.id);
+          
+        if (error) {
+          console.error('Error unliking media:', error);
+          if (error.code === '42P01') { // Table doesn't exist error
+            showMediaLikesTableMissingAlert();
+            return;
+          }
+          throw error;
+        }
+        
+        console.log('Successfully unliked media');
+        
+        // Update local state immediately
+        setMedia(prevMedia => 
+          prevMedia.map(item => 
+            item.id === mediaItem.id 
+              ? { 
+                  ...item, 
+                  likes_count: Math.max(0, item.likes_count - 1),
+                  user_has_liked: false 
+                } 
+              : item
+          )
+        );
+        
+        // If we're viewing this media in full screen, update that too
+        if (selectedMedia?.id === mediaItem.id) {
+          setSelectedMedia({
+            ...selectedMedia,
+            likes_count: Math.max(0, selectedMedia.likes_count - 1),
+            user_has_liked: false
+          });
+        }
+      } else {
+        // Like the media
+        console.log('Liking media:', mediaItem.id);
+        const { error } = await supabase
+          .from('media_likes')
+          .insert({
+            media_id: mediaItem.id,
+            user_id: user.id
+          });
+          
+        if (error) {
+          console.error('Error liking media:', error);
+          if (error.code === '42P01') { // Table doesn't exist error
+            showMediaLikesTableMissingAlert();
+            return;
+          }
+          throw error;
+        }
+        
+        console.log('Successfully liked media');
+        
+        // Update local state immediately
+        setMedia(prevMedia => 
+          prevMedia.map(item => 
+            item.id === mediaItem.id 
+              ? { 
+                  ...item, 
+                  likes_count: item.likes_count + 1,
+                  user_has_liked: true 
+                } 
+              : item
+          )
+        );
+        
+        // If we're viewing this media in full screen, update that too
+        if (selectedMedia?.id === mediaItem.id) {
+          setSelectedMedia({
+            ...selectedMedia,
+            likes_count: selectedMedia.likes_count + 1,
+            user_has_liked: true
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error liking/unliking media:', error);
+      Alert.alert('Error', 'Failed to like/unlike media');
+    } finally {
+      setLikingInProgress(false);
+    }
+  };
+
+  // Add the missing renderMediaItem function
+  const renderMediaItem = ({ item }: { item: MediaWithUser }) => {
+    // Check if this media was uploaded by the event creator
+    const isCreatorMedia = item.user_id === currentEvent?.created_by;
+    
+    // Get the display name to show (only used in full screen view now)
+    let displayName = 'Unknown User';
+    
+    // If it's the creator's media, use the creator_display_name from the event
+    if (isCreatorMedia && currentEvent?.creator_display_name) {
+      displayName = currentEvent.creator_display_name;
+    } 
+    // Otherwise use the display name from the media item
+    else if (item.user?.display_name) {
+      displayName = item.user.display_name;
+    }
+    
+    if (selectionMode) {
+      const isSelected = selectedItems.includes(item.id);
+      return (
+        <TouchableOpacity 
+          style={[
+            styles.mediaItem, 
+            isSelected && styles.selectedMediaItem
+          ]}
+          onPress={() => toggleItemSelection(item.id)}
+        >
+          <Image 
+            source={{ uri: item.url }} 
+            style={styles.mediaThumbnail}
+            resizeMode="cover"
+          />
+          {isSelected && (
+            <View style={styles.selectionOverlay}>
+              <MaterialIcons name="check-circle" size={24} color="#007AFF" />
+            </View>
+          )}
+          {item.likes_count > 0 && (
+            <View style={styles.likesCountBadge}>
+              <MaterialIcons name="favorite" size={12} color="#fff" />
+              <Text style={styles.likesCountText}>{item.likes_count}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      );
+    }
+    
+    return (
+      <TouchableOpacity 
+        style={styles.mediaItem}
+        onPress={() => showFullScreenImage(item)}
+        onLongPress={() => {
+          console.log('onLongPress triggered, isCreator:', isCreator, 'isCreatorMedia:', isCreatorMedia);
+          // Allow any user to enter selection mode
+          toggleSelectionMode();
+          toggleItemSelection(item.id);
+        }}
+        delayLongPress={500}
+      >
+        <Image 
+          source={{ uri: item.url }} 
+          style={styles.mediaThumbnail}
+          resizeMode="cover"
+        />
+        <View style={styles.mediaAttributionStrip}>
+          <Text style={styles.mediaAttributionText} numberOfLines={1}>
+            by: {displayName}
+          </Text>
+        </View>
+        {item.likes_count > 0 && (
+          <View style={styles.likesCountBadge}>
+            <MaterialIcons name="favorite" size={12} color="#fff" />
+            <Text style={styles.likesCountText}>{item.likes_count}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
