@@ -1414,6 +1414,15 @@ export const GalleryScreen = () => {
     );
   };
 
+  // Modify the conditional for showing selection mode button - only show for creators or users with deletable photos
+  const userHasDeletablePhotos = React.useMemo(() => {
+    // Check if current user has any photos they can delete
+    if (!session?.user?.id) return false;
+    
+    const currentUserId = session.user.id;
+    return media.some(item => item.user_id === currentUserId);
+  }, [media, session?.user?.id]);
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -1429,13 +1438,12 @@ export const GalleryScreen = () => {
             
             <View style={styles.titleContainer}>
               <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
-                {selectionMode && ` • ${selectedItems.length} selected`}
+                Loading gallery...
               </Text>
             </View>
             
             <View style={styles.headerActionsContainer}>
-              {/* Filter button */}
+              {/* Filter button in header */}
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => setFilterModalVisible(true)}
@@ -1454,55 +1462,56 @@ export const GalleryScreen = () => {
               >
                 <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
               </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading gallery...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        {/* Modern header with gradient background */}
+        <View style={styles.modernHeader}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity 
+              style={styles.backButtonContainer}
+              onPress={handleBackPress}
+            >
+              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+            
+            <View style={styles.titleContainer}>
+              <Text style={styles.headerSubtitle} numberOfLines={1}>
+                Error loading gallery
+              </Text>
+            </View>
+            
+            <View style={styles.headerActionsContainer}>
+              {/* Filter button in header */}
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => setFilterModalVisible(true)}
+              >
+                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
               
-              {/* Download all button */}
-              {!selectionMode && filteredMedia.length > 0 && (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleDownloadAllPhotos}
-                  disabled={downloadingAll}
-                >
-                  {downloadingAll ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
-                  )}
-                </TouchableOpacity>
-              )}
-              
-              {/* Selection mode buttons */}
-              {selectionMode ? (
-                <>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={toggleSelectionMode}
-                  >
-                    <MaterialIcons name="close" size={24} color="#FFFFFF" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.actionButton, 
-                      styles.deleteButton,
-                      selectedItems.length === 0 && styles.disabledButton
-                    ]}
-                    onPress={deleteSelectedItems}
-                    disabled={selectedItems.length === 0 || multiDeleteInProgress}
-                  >
-                    {multiDeleteInProgress ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <MaterialIcons name="delete" size={24} color="#FFFFFF" />
-                    )}
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={toggleSelectionMode}
-                >
-                  <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              )}
+              {/* Refresh button */}
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={async () => {
+                  console.log('Manual refresh requested');
+                  await refreshCurrentUserDisplayName();
+                  fetchEventMedia();
+                }}
+              >
+                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -1515,6 +1524,7 @@ export const GalleryScreen = () => {
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
+        {renderFilterModal()}
       </View>
     );
   }
@@ -1539,12 +1549,24 @@ export const GalleryScreen = () => {
             </View>
             
             <View style={styles.headerActionsContainer}>
-              {/* Filter button */}
+              {/* Filter button in header */}
               <TouchableOpacity
-                style={styles.filterButton}
+                style={styles.actionButton}
                 onPress={() => setFilterModalVisible(true)}
               >
-                <Ionicons name="filter-outline" size={24} color="#333" />
+                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+              
+              {/* Refresh button */}
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={async () => {
+                  console.log('Manual refresh requested');
+                  await refreshCurrentUserDisplayName();
+                  fetchEventMedia();
+                }}
+              >
+                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
           </View>
@@ -1563,6 +1585,7 @@ export const GalleryScreen = () => {
             <Text style={styles.cameraButtonText}>Go to Camera</Text>
           </TouchableOpacity>
         </View>
+        {renderFilterModal()}
       </View>
     );
   }
@@ -1590,74 +1613,13 @@ export const GalleryScreen = () => {
             </View>
             
             <View style={styles.headerActionsContainer}>
-              {/* Filter button */}
-              <TouchableOpacity
-                style={styles.filterButton}
-                onPress={() => setFilterModalVisible(true)}
-              >
-                <Ionicons name="filter-outline" size={24} color="#333" />
-              </TouchableOpacity>
-              
-              {/* Refresh button */}
+              {/* Filter button in header */}
               <TouchableOpacity
                 style={styles.actionButton}
-                onPress={async () => {
-                  console.log('Manual refresh requested');
-                  await refreshCurrentUserDisplayName();
-                  fetchEventMedia();
-                }}
+                onPress={() => setFilterModalVisible(true)}
               >
-                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
+                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
               </TouchableOpacity>
-              
-              {/* Download all button */}
-              {!selectionMode && filteredMedia.length > 0 && (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleDownloadAllPhotos}
-                  disabled={downloadingAll}
-                >
-                  {downloadingAll ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
-                  )}
-                </TouchableOpacity>
-              )}
-              
-              {/* Selection mode buttons */}
-              {selectionMode ? (
-                <>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={toggleSelectionMode}
-                  >
-                    <MaterialIcons name="close" size={24} color="#FFFFFF" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.actionButton, 
-                      styles.deleteButton,
-                      selectedItems.length === 0 && styles.disabledButton
-                    ]}
-                    onPress={deleteSelectedItems}
-                    disabled={selectedItems.length === 0 || multiDeleteInProgress}
-                  >
-                    {multiDeleteInProgress ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <MaterialIcons name="delete" size={24} color="#FFFFFF" />
-                    )}
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={toggleSelectionMode}
-                >
-                  <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         </View>
