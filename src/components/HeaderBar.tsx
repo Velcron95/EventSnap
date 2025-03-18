@@ -85,7 +85,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           ) : (
             <>
               <Image 
-                source={require('../../assets/Logo.png')} 
+                source={require('../../assets/AppImage.jpg')} 
                 style={styles.logo}
                 resizeMode="contain"
               />

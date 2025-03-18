@@ -79,183 +79,272 @@ export const GalleryScreen = () => {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most_likes'>('newest');
   const [filteredMedia, setFilteredMedia] = useState<MediaWithUser[]>([]);
 
-  // More direct approach to navigate with animation
-  const navigateWithAnimation = (direction: 'next' | 'previous') => {
-    if (direction === 'next') {
-      navigateToNextImageWithAnimation();
-    } else {
-      navigateToPreviousImageWithAnimation();
-    }
-  };
-
-  // Update the navigation with arrow buttons to use the same animation pattern as swiping
-  const navigateToNextImageWithAnimation = () => {
-    const actualCurrentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
-    if (actualCurrentIdx < filteredMedia.length - 1) {
-      const nextIdx = actualCurrentIdx + 1;
-      const nextItem = filteredMedia[nextIdx];
-      
-      // Animate current image off screen to the left
-      Animated.timing(translateX, {
-        toValue: -width,
-        duration: 250,
-        useNativeDriver: true,
-      }).start(() => {
-        // Set the new image
-        setCurrentIndex(nextIdx);
-        setSelectedMedia(nextItem);
-        
-        // Move new image to right edge to prepare for animation
-        translateX.setValue(width);
-        
-        // Animate new image in from the right
-        Animated.timing(translateX, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }).start();
-      });
-    }
-  };
+  // Add this for direct swipe handling
+  const [imageIndex, setImageIndex] = useState(0);
   
-  const navigateToPreviousImageWithAnimation = () => {
-    const actualCurrentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
-    if (actualCurrentIdx > 0) {
-      const prevIdx = actualCurrentIdx - 1;
-      const prevItem = filteredMedia[prevIdx];
-      
-      // Animate current image off screen to the right
-      Animated.timing(translateX, {
-        toValue: width,
-        duration: 250,
-        useNativeDriver: true,
-      }).start(() => {
-        // Set the new image
-        setCurrentIndex(prevIdx);
-        setSelectedMedia(prevItem);
-        
-        // Move new image to left edge to prepare for animation
-        translateX.setValue(-width);
-        
-        // Animate new image in from the left
-        Animated.timing(translateX, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }).start();
-      });
-    }
-  };
-
   // Create pan responder for swiping images
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        // Reset the animation value when starting the gesture
         translateX.setValue(0);
       },
       onPanResponderMove: (_, gestureState) => {
-        // Update animation value as the finger moves
         translateX.setValue(gestureState.dx);
       },
       onPanResponderRelease: (_, gestureState) => {
         const { dx, vx } = gestureState;
-        console.log('Pan responder release, dx:', dx, 'vx:', vx, 'currentIndex:', currentIndex);
+        console.log('Pan responder release, dx:', dx, 'vx:', vx);
         
-        // Calculate the current index in the array to ensure we have the latest
-        const actualCurrentIdx = filteredMedia.findIndex(m => m.id === selectedMedia?.id);
-        console.log('Current index in array:', actualCurrentIdx);
-        
-        // Determine if swipe should trigger a navigation action
+        // Calculate if this should trigger next/previous
         const isSignificantSwipe = Math.abs(dx) > width * 0.2 || Math.abs(vx) > 0.3;
-        const canSwipeLeft = actualCurrentIdx < filteredMedia.length - 1;
-        const canSwipeRight = actualCurrentIdx > 0;
         
-        // If it's a significant left swipe (next) and we have more images
-        if (isSignificantSwipe && dx < 0 && canSwipeLeft) {
-          console.log('Significant left swipe detected, going to next image');
-          
-          // The target index for the next image
-          const nextIdx = actualCurrentIdx + 1;
-          const nextItem = filteredMedia[nextIdx];
-          
-          // Animate current image off screen to the left
-          Animated.timing(translateX, {
-            toValue: -width,
-            duration: 250,
-            useNativeDriver: true,
-          }).start(() => {
-            // Once current image is off screen, update the image
-            console.log('Changing to next image, index:', nextIdx);
-            setCurrentIndex(nextIdx);
-            setSelectedMedia(nextItem);
-            
-            // Reset position, ready for new image to animate in
-            translateX.setValue(width);
-            
-            // Animate new image in from the right
-            Animated.timing(translateX, {
-              toValue: 0,
-              duration: 250,
-              useNativeDriver: true,
-            }).start();
-          });
-        }
-        // If it's a significant right swipe (previous) and we're not at the first image
-        else if (isSignificantSwipe && dx > 0 && canSwipeRight) {
-          console.log('Significant right swipe detected, going to previous image');
-          
-          // The target index for the previous image
-          const prevIdx = actualCurrentIdx - 1;
-          const prevItem = filteredMedia[prevIdx];
-          
-          // Animate current image off screen to the right
-          Animated.timing(translateX, {
-            toValue: width,
-            duration: 250,
-            useNativeDriver: true,
-          }).start(() => {
-            // Once current image is off screen, update the image
-            console.log('Changing to previous image, index:', prevIdx);
-            setCurrentIndex(prevIdx);
-            setSelectedMedia(prevItem);
-            
-            // Reset position, ready for new image to animate in
-            translateX.setValue(-width);
-            
-            // Animate new image in from the left
-            Animated.timing(translateX, {
-              toValue: 0,
-              duration: 250,
-              useNativeDriver: true,
-            }).start();
-          });
-        }
-        // Not a significant swipe, or can't navigate in that direction
-        else {
-          console.log('Not a significant swipe or cannot navigate further, bouncing back');
-          // Spring back to center
+        if (isSignificantSwipe) {
+          if (dx < 0) {
+            // Next image (swipe left)
+            handleSwipeLeft();
+          } else {
+            // Previous image (swipe right)
+            handleSwipeRight();
+          }
+        } else {
+          // Not a significant swipe, bounce back
           Animated.spring(translateX, {
             toValue: 0,
             tension: 50,
             friction: 7,
-            useNativeDriver: true,
+            useNativeDriver: true
           }).start();
         }
-      },
-      onPanResponderTerminate: () => {
-        // If the gesture is terminated unexpectedly, reset animation
-        Animated.spring(translateX, {
-          toValue: 0,
-          tension: 50,
-          friction: 7,
-          useNativeDriver: true,
-        }).start();
       }
     })
   ).current;
+  
+  // Handle left swipe (next image)
+  const handleSwipeLeft = () => {
+    if (filteredMedia.length === 0 || imageIndex >= filteredMedia.length - 1) {
+      // Can't go further, bounce back
+      Animated.spring(translateX, {
+        toValue: 0,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true
+      }).start();
+      return;
+    }
+    
+    // Animate current image off screen
+    Animated.timing(translateX, {
+      toValue: -width,
+      duration: 250,
+      useNativeDriver: true
+    }).start(() => {
+      // Move to next image
+      const nextIndex = imageIndex + 1;
+      setImageIndex(nextIndex);
+      setSelectedMedia(filteredMedia[nextIndex]);
+      
+      // Reset position for next image to come in from right
+      translateX.setValue(width);
+      
+      // Animate next image in
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true
+      }).start();
+    });
+  };
+  
+  // Handle right swipe (previous image)
+  const handleSwipeRight = () => {
+    if (filteredMedia.length === 0 || imageIndex <= 0) {
+      // Can't go further, bounce back
+      Animated.spring(translateX, {
+        toValue: 0,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true
+      }).start();
+      return;
+    }
+    
+    // Animate current image off screen
+    Animated.timing(translateX, {
+      toValue: width,
+      duration: 250,
+      useNativeDriver: true
+    }).start(() => {
+      // Move to previous image
+      const prevIndex = imageIndex - 1;
+      setImageIndex(prevIndex);
+      setSelectedMedia(filteredMedia[prevIndex]);
+      
+      // Reset position for previous image to come in from left
+      translateX.setValue(-width);
+      
+      // Animate previous image in
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true
+      }).start();
+    });
+  };
+  
+  // Show fullscreen image with our new index tracking
+  const showFullScreenImage = (item: MediaWithUser) => {
+    const index = filteredMedia.findIndex(m => m.id === item.id);
+    console.log('showFullScreenImage - Selected index:', index);
+    
+    if (index !== -1) {
+      setImageIndex(index);
+      setSelectedMedia(item);
+      setFullScreenVisible(true);
+      setHeaderVisible(false);
+    } else {
+      console.error('Cannot find selected media in filteredMedia array');
+    }
+  };
+  
+  // Close fullscreen image
+  const closeFullScreenImage = () => {
+    setFullScreenVisible(false);
+    setSelectedMedia(null);
+    setHeaderVisible(true);
+  };
+  
+  // Update the renderFullScreenImage function to use our new handlers
+  const renderFullScreenImage = () => {
+    if (!selectedMedia || filteredMedia.length === 0) return null;
+    
+    const hasPrevious = imageIndex > 0;
+    const hasNext = imageIndex < filteredMedia.length - 1;
+    
+    // Check if this media was uploaded by the event creator
+    const isCreatorMedia = selectedMedia.user_id === currentEvent?.created_by;
+    
+    // Get the display name
+    let displayName = 'Unknown User';
+    
+    // If it's the creator's media, use the creator_display_name from the event
+    if (isCreatorMedia && currentEvent?.creator_display_name) {
+      displayName = currentEvent.creator_display_name;
+    } 
+    // Use the display name from the media item
+    else if (selectedMedia.user?.display_name) {
+      displayName = selectedMedia.user.display_name;
+    }
+    
+    return (
+      <View style={styles.fullScreenContainer}>
+        <StatusBar hidden />
+        
+        <Animated.View 
+          style={[
+            styles.fullScreenImageContainer,
+            { transform: [{ translateX }] }
+          ]}
+          {...panResponder.panHandlers}
+        >
+          <Image 
+            source={{ uri: selectedMedia.url }} 
+            style={styles.fullScreenImage}
+            resizeMode="contain"
+          />
+        </Animated.View>
+        
+        <View style={styles.fullScreenOverlay}>
+          <View style={styles.fullScreenHeader}>
+            <TouchableOpacity 
+              style={styles.closeButton}
+              onPress={closeFullScreenImage}
+            >
+              <MaterialIcons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
+            
+            <Text style={styles.imageCounter}>
+              {imageIndex + 1} / {filteredMedia.length}
+            </Text>
+          </View>
+          
+          <View style={styles.fullScreenFooter}>
+            <View style={styles.mediaInfo}>
+              <Text style={styles.mediaInfoText}>
+                By: {displayName}
+                {isCreatorMedia && <Text style={styles.creatorTag}> (Creator)</Text>}
+              </Text>
+              <Text style={styles.mediaInfoDate}>
+                {new Date(selectedMedia.created_at).toLocaleString()}
+              </Text>
+            </View>
+            
+            <View style={styles.mediaActions}>
+              <TouchableOpacity
+                style={[
+                  styles.mediaAction,
+                  selectedMedia.user_has_liked && styles.likedAction
+                ]}
+                onPress={() => handleLikeMedia(selectedMedia)}
+                disabled={likingInProgress}
+              >
+                <MaterialIcons 
+                  name={selectedMedia.user_has_liked ? "favorite" : "favorite-border"} 
+                  size={24} 
+                  color="#fff" 
+                />
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.mediaAction}
+                onPress={() => downloadMedia(selectedMedia)}
+                disabled={downloading}
+              >
+                {downloading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <MaterialIcons name="file-download" size={24} color="#fff" />
+                )}
+              </TouchableOpacity>
+              
+              {isCreator && (
+                <TouchableOpacity
+                  style={[styles.mediaAction, styles.deleteAction]}
+                  onPress={() => deleteMedia(selectedMedia)}
+                  disabled={deleting}
+                >
+                  {deleting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <MaterialIcons name="delete" size={24} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+          
+          {hasPrevious && (
+            <TouchableOpacity 
+              style={[styles.navButton, styles.prevButton]}
+              onPress={handleSwipeRight}
+            >
+              <MaterialIcons name="chevron-left" size={40} color="#fff" />
+            </TouchableOpacity>
+          )}
+          
+          {hasNext && (
+            <TouchableOpacity 
+              style={[styles.navButton, styles.nextButton]}
+              onPress={handleSwipeLeft}
+            >
+              <MaterialIcons name="chevron-right" size={40} color="#fff" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
 
   // Add a debug effect to check isCreator
   useEffect(() => {
@@ -933,26 +1022,6 @@ export const GalleryScreen = () => {
     }
   };
 
-  // Show fullscreen image with debug logging
-  const showFullScreenImage = (item: MediaWithUser) => {
-    console.log('showFullScreenImage called for item:', item.id);
-    const index = filteredMedia.findIndex(m => m.id === item.id);
-    console.log('Found index:', index, 'of', filteredMedia.length, 'items');
-    
-    setCurrentIndex(index >= 0 ? index : 0);
-    setSelectedMedia(item);
-    setFullScreenVisible(true);
-    setHeaderVisible(false); // Hide header when showing fullscreen
-  };
-
-  // Close fullscreen image
-  const closeFullScreenImage = () => {
-    console.log('closeFullScreenImage called');
-    setFullScreenVisible(false);
-    setSelectedMedia(null);
-    setHeaderVisible(true); // Show header when closing fullscreen
-  };
-
   // Add this function to show a user-friendly alert about the missing table
   const showMediaLikesTableMissingAlert = () => {
     Alert.alert(
@@ -1169,154 +1238,6 @@ export const GalleryScreen = () => {
           </View>
         )}
       </TouchableOpacity>
-    );
-  };
-
-  // Update the renderFullScreenImage function to use Animated and PanResponder
-  const renderFullScreenImage = () => {
-    if (!selectedMedia) return null;
-    
-    // Re-calculate the index each time to ensure it's correct
-    const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia.id);
-    console.log('Current index in renderFullScreenImage:', currentIdx);
-    
-    // Update current index if it doesn't match
-    if (currentIndex !== currentIdx && currentIdx >= 0) {
-      console.log('Updating currentIndex to match array position');
-      setCurrentIndex(currentIdx);
-    }
-    
-    const hasPrevious = currentIdx > 0;
-    const hasNext = currentIdx < filteredMedia.length - 1;
-    
-    // Check if this media was uploaded by the event creator
-    const isCreatorMedia = selectedMedia.user_id === currentEvent?.created_by;
-    
-    // Get the display name to show - always get the most up-to-date version from the media array
-    let displayName = 'Unknown User';
-    
-    // Find the current version of this media item in the media array
-    const currentMediaItem = filteredMedia.find(m => m.id === selectedMedia.id);
-    
-    // If it's the creator's media, use the creator_display_name from the event
-    if (isCreatorMedia && currentEvent?.creator_display_name) {
-      displayName = currentEvent.creator_display_name;
-    } 
-    // Use the display name from the current media item in the array (which may have been refreshed)
-    else if (currentMediaItem?.user?.display_name) {
-      displayName = currentMediaItem.user.display_name;
-    }
-    // Fall back to the selected media's display name if needed
-    else if (selectedMedia.user?.display_name) {
-      displayName = selectedMedia.user.display_name;
-    }
-    
-    return (
-      <View style={styles.fullScreenContainer}>
-        <StatusBar hidden />
-        
-        <Animated.View 
-          style={[
-            styles.fullScreenImageContainer,
-            { transform: [{ translateX }] }
-          ]}
-          {...panResponder.panHandlers}
-        >
-          <Image 
-            source={{ uri: selectedMedia.url }} 
-            style={styles.fullScreenImage}
-            resizeMode="contain"
-          />
-        </Animated.View>
-        
-        <View style={styles.fullScreenOverlay}>
-          <View style={styles.fullScreenHeader}>
-            <TouchableOpacity 
-              style={styles.closeButton}
-              onPress={closeFullScreenImage}
-            >
-              <MaterialIcons name="close" size={24} color="#fff" />
-            </TouchableOpacity>
-            
-            <Text style={styles.imageCounter}>
-              {currentIdx + 1} / {filteredMedia.length}
-            </Text>
-          </View>
-          
-          <View style={styles.fullScreenFooter}>
-            <View style={styles.mediaInfo}>
-              <Text style={styles.mediaInfoText}>
-                By: {displayName}
-                {isCreatorMedia && <Text style={styles.creatorTag}> (Creator)</Text>}
-              </Text>
-              <Text style={styles.mediaInfoDate}>
-                {new Date(selectedMedia.created_at).toLocaleString()}
-              </Text>
-            </View>
-            
-            <View style={styles.mediaActions}>
-              <TouchableOpacity
-                style={[
-                  styles.mediaAction,
-                  selectedMedia.user_has_liked && styles.likedAction
-                ]}
-                onPress={() => handleLikeMedia(selectedMedia)}
-                disabled={likingInProgress}
-              >
-                <MaterialIcons 
-                  name={selectedMedia.user_has_liked ? "favorite" : "favorite-border"} 
-                  size={24} 
-                  color="#fff" 
-                />
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={styles.mediaAction}
-                onPress={() => downloadMedia(selectedMedia)}
-                disabled={downloading}
-              >
-                {downloading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <MaterialIcons name="file-download" size={24} color="#fff" />
-                )}
-              </TouchableOpacity>
-              
-              {isCreator && (
-                <TouchableOpacity
-                  style={[styles.mediaAction, styles.deleteAction]}
-                  onPress={() => deleteMedia(selectedMedia)}
-                  disabled={deleting}
-                >
-                  {deleting ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <MaterialIcons name="delete" size={24} color="#fff" />
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-          
-          {hasPrevious && (
-            <TouchableOpacity 
-              style={[styles.navButton, styles.prevButton]}
-              onPress={navigateToPreviousImageWithAnimation}
-            >
-              <MaterialIcons name="chevron-left" size={40} color="#fff" />
-            </TouchableOpacity>
-          )}
-          
-          {hasNext && (
-            <TouchableOpacity 
-              style={[styles.navButton, styles.nextButton]}
-              onPress={navigateToNextImageWithAnimation}
-            >
-              <MaterialIcons name="chevron-right" size={40} color="#fff" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
     );
   };
 
