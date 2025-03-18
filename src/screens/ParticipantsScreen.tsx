@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useLayoutEffect, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, SafeAreaView, BackHandler, Clipboard } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, SafeAreaView, BackHandler, Clipboard, Platform } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
@@ -1210,11 +1210,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   eventBanner: {
-    backgroundColor: '#007AFF',
-    padding: spacing.md,
+    backgroundColor: colors.primary,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    padding: spacing.md,
+    paddingTop: Platform.OS === 'ios' ? 50 : spacing.md,
   },
   eventNameContainer: {
     flexDirection: 'row',
