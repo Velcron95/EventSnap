@@ -150,11 +150,11 @@ const styles = StyleSheet.create({
     maxHeight: 75,
   },
   logo: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    maxWidth: 48,
-    maxHeight: 48,
+    width: 40,
+    height: 40,
+    maxWidth: 40,
+    maxHeight: 40,
+    marginLeft: 4,
   },
   appName: {
     color: '#FFFFFF',

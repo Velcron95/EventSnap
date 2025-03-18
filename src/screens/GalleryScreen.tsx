@@ -94,17 +94,23 @@ export const GalleryScreen = () => {
         
         // If swipe is fast enough or far enough
         if (Math.abs(dx) > width * 0.3 || Math.abs(vx) > 0.3) {
-          // Swiped left
-          if (dx < 0 && currentIndex < media.length - 1) {
+          // Swiped left (next image)
+          if (dx < 0 && currentIndex < filteredMedia.length - 1) {
             animateSwipe(-width, () => {
-              navigateToNextImage();
+              const nextIdx = currentIndex + 1;
+              const nextMedia = filteredMedia[nextIdx];
+              setCurrentIndex(nextIdx);
+              setSelectedMedia(nextMedia);
               resetPosition('right');
             });
           } 
-          // Swiped right
+          // Swiped right (previous image)
           else if (dx > 0 && currentIndex > 0) {
             animateSwipe(width, () => {
-              navigateToPreviousImage();
+              const prevIdx = currentIndex - 1;
+              const prevMedia = filteredMedia[prevIdx];
+              setCurrentIndex(prevIdx);
+              setSelectedMedia(prevMedia);
               resetPosition('left');
             });
           } 
@@ -798,12 +804,12 @@ export const GalleryScreen = () => {
   };
 
   const navigateToNextImage = () => {
-    if (!selectedMedia || media.length <= 1) return;
+    if (!selectedMedia || filteredMedia.length <= 1) return;
     
-    const currentIdx = media.findIndex(m => m.id === selectedMedia.id);
-    if (currentIdx < media.length - 1) {
+    const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia.id);
+    if (currentIdx < filteredMedia.length - 1) {
       const nextIdx = currentIdx + 1;
-      const nextMedia = media[nextIdx];
+      const nextMedia = filteredMedia[nextIdx];
       
       console.log('Navigating to next image:', {
         userId: nextMedia.user_id,
@@ -817,12 +823,12 @@ export const GalleryScreen = () => {
   };
   
   const navigateToPreviousImage = () => {
-    if (!selectedMedia || media.length <= 1) return;
+    if (!selectedMedia || filteredMedia.length <= 1) return;
     
-    const currentIdx = media.findIndex(m => m.id === selectedMedia.id);
+    const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia.id);
     if (currentIdx > 0) {
       const prevIdx = currentIdx - 1;
-      const prevMedia = media[prevIdx];
+      const prevMedia = filteredMedia[prevIdx];
       
       console.log('Navigating to previous image:', {
         userId: prevMedia.user_id,
@@ -837,7 +843,7 @@ export const GalleryScreen = () => {
 
   // Show fullscreen image
   const showFullScreenImage = (item: MediaWithUser) => {
-    const index = media.findIndex(m => m.id === item.id);
+    const index = filteredMedia.findIndex(m => m.id === item.id);
     setCurrentIndex(index >= 0 ? index : 0);
     setSelectedMedia(item);
     setFullScreenVisible(true);
@@ -1074,9 +1080,9 @@ export const GalleryScreen = () => {
   const renderFullScreenImage = () => {
     if (!selectedMedia) return null;
     
-    const currentIdx = media.findIndex(m => m.id === selectedMedia.id);
+    const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia.id);
     const hasPrevious = currentIdx > 0;
-    const hasNext = currentIdx < media.length - 1;
+    const hasNext = currentIdx < filteredMedia.length - 1;
     
     // Check if this media was uploaded by the event creator
     const isCreatorMedia = selectedMedia.user_id === currentEvent?.created_by;
@@ -1085,7 +1091,7 @@ export const GalleryScreen = () => {
     let displayName = 'Unknown User';
     
     // Find the current version of this media item in the media array
-    const currentMediaItem = media.find(m => m.id === selectedMedia.id);
+    const currentMediaItem = filteredMedia.find(m => m.id === selectedMedia.id);
     
     // If it's the creator's media, use the creator_display_name from the event
     if (isCreatorMedia && currentEvent?.creator_display_name) {
@@ -1136,7 +1142,7 @@ export const GalleryScreen = () => {
             </TouchableOpacity>
             
             <Text style={styles.imageCounter}>
-              {currentIdx + 1} / {media.length}
+              {currentIdx + 1} / {filteredMedia.length}
             </Text>
           </View>
           
@@ -1245,12 +1251,12 @@ export const GalleryScreen = () => {
       // Show progress alert
       Alert.alert(
         'Downloading Photos',
-        `Downloading ${media.length} photos. This may take a while.`,
+        `Downloading ${filteredMedia.length} photos. This may take a while.`,
         [{ text: 'OK' }]
       );
       
       // Download each photo
-      const downloadPromises = media.map(async (item, index) => {
+      const downloadPromises = filteredMedia.map(async (item, index) => {
         try {
           const fileName = `photo_${index + 1}.jpg`;
           const fileUri = tempDir + fileName;
@@ -1274,7 +1280,7 @@ export const GalleryScreen = () => {
       // Show completion alert
       Alert.alert(
         'Download Complete',
-        `Successfully downloaded ${successfulDownloads.length} of ${media.length} photos to your device.`,
+        `Successfully downloaded ${successfulDownloads.length} of ${filteredMedia.length} photos to your device.`,
         [{ text: 'OK' }]
       );
       
@@ -1418,7 +1424,7 @@ export const GalleryScreen = () => {
             
             <View style={styles.titleContainer}>
               <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${media.length} ${Number(media.length) === 1 ? "photo" : "photos"}`}
+                {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
                 {selectionMode && ` • ${selectedItems.length} selected`}
               </Text>
             </View>
@@ -1445,7 +1451,7 @@ export const GalleryScreen = () => {
               </TouchableOpacity>
               
               {/* Download all button */}
-              {!selectionMode && media.length > 0 && (
+              {!selectionMode && filteredMedia.length > 0 && (
                 <TouchableOpacity
                   style={styles.actionButton}
                   onPress={handleDownloadAllPhotos}
@@ -1515,7 +1521,7 @@ export const GalleryScreen = () => {
             
             <View style={styles.titleContainer}>
               <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${media.length} ${Number(media.length) === 1 ? "photo" : "photos"}`}
+                {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
                 {selectionMode && ` • ${selectedItems.length} selected`}
               </Text>
             </View>
@@ -1542,7 +1548,7 @@ export const GalleryScreen = () => {
               </TouchableOpacity>
               
               {/* Download all button */}
-              {!selectionMode && media.length > 0 && (
+              {!selectionMode && filteredMedia.length > 0 && (
                 <TouchableOpacity
                   style={styles.actionButton}
                   onPress={handleDownloadAllPhotos}
@@ -1605,7 +1611,7 @@ export const GalleryScreen = () => {
     );
   }
 
-  if (media.length === 0) {
+  if (filteredMedia.length === 0) {
     return (
       <View style={styles.container}>
         {/* Modern header with gradient background */}
@@ -1620,7 +1626,7 @@ export const GalleryScreen = () => {
             
             <View style={styles.titleContainer}>
               <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${media.length} ${Number(media.length) === 1 ? "photo" : "photos"}`}
+                {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
               </Text>
             </View>
             
@@ -1670,7 +1676,7 @@ export const GalleryScreen = () => {
             
             <View style={styles.titleContainer}>
               <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${media.length} ${Number(media.length) === 1 ? "photo" : "photos"}`}
+                {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
                 {selectionMode && ` • ${selectedItems.length} selected`}
               </Text>
             </View>
@@ -1697,7 +1703,7 @@ export const GalleryScreen = () => {
               </TouchableOpacity>
               
               {/* Download all button */}
-              {!selectionMode && media.length > 0 && (
+              {!selectionMode && filteredMedia.length > 0 && (
                 <TouchableOpacity
                   style={styles.actionButton}
                   onPress={handleDownloadAllPhotos}
@@ -1767,7 +1773,7 @@ export const GalleryScreen = () => {
                   <Text style={styles.retryText}>Retry</Text>
                 </TouchableOpacity>
               </View>
-            ) : media.length === 0 ? (
+            ) : filteredMedia.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <MaterialIcons name="photo-library" size={64} color="#CCCCCC" />
                 <Text style={styles.emptyText}>No photos or videos yet</Text>
