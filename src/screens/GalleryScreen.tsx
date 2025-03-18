@@ -1648,8 +1648,18 @@ export const GalleryScreen = () => {
                 </TouchableOpacity>
               )}
               
-              {/* Selection mode buttons - only show if user is creator or has their own photos */}
-              {selectionMode ? (
+              {/* Only show select button for creators, not for regular participants */}
+              {!selectionMode && isCreator && (
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={toggleSelectionMode}
+                >
+                  <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
+              
+              {/* Selection mode buttons - only shown when in selection mode */}
+              {selectionMode && (
                 <>
                   <TouchableOpacity
                     style={styles.actionButton}
@@ -1673,16 +1683,6 @@ export const GalleryScreen = () => {
                     )}
                   </TouchableOpacity>
                 </>
-              ) : (
-                /* Only show select button for users who can delete photos (creators or users with their own photos) */
-                (isCreator || userHasDeletablePhotos) && (
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={toggleSelectionMode}
-                  >
-                    <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
-                  </TouchableOpacity>
-                )
               )}
             </View>
           </View>
