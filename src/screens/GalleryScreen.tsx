@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share, BackHandler, Modal, SafeAreaView } from 'react-native';
+import React, { useEffect, useState, useRef, useLayoutEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share, BackHandler, Modal, SafeAreaView, Easing, Switch, Platform } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
@@ -17,6 +17,7 @@ import { colors, spacing } from '../styles/theme';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { refreshCurrentUserDisplayName } from '../lib/displayNameUtils';
 import { RadioButton } from 'react-native-paper';
+import { Ionicons } from '@expo/vector-icons';
 
 type GalleryScreenNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<EventTabParamList, 'Gallery'>,
@@ -36,6 +37,9 @@ type MediaWithUser = Media & {
 const { width, height } = Dimensions.get('window');
 const numColumns = 3;
 const tileSize = width / numColumns;
+
+// Add "likes" to the SortOption type
+type SortOption = 'newest' | 'oldest' | 'most_likes' | 'likes';
 
 export const GalleryScreen = () => {
   const navigation = useNavigation<GalleryScreenNavigationProp>();
@@ -76,8 +80,10 @@ export const GalleryScreen = () => {
 
   // Add new state variables for filtering
   const [filterModalVisible, setFilterModalVisible] = useState(false);
-  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most_likes'>('newest');
+  const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [filteredMedia, setFilteredMedia] = useState<MediaWithUser[]>([]);
+  // Add new filter to show only user's photos
+  const [showOnlyMyPhotos, setShowOnlyMyPhotos] = useState(false);
   
   // Add this for direct swipe handling
   const [imageIndex, setImageIndex] = useState(0);
@@ -524,6 +530,20 @@ export const GalleryScreen = () => {
   };
 
   const deleteMedia = async (mediaItem: MediaWithUser) => {
+    // Get current user
+    const { data: sessionData } = await supabase.auth.getSession();
+    const currentUserId = sessionData?.session?.user?.id;
+    
+    // Check if current user has permission to delete this media
+    // They can delete if they're the event creator OR if it's their own photo
+    const isOwnMedia = mediaItem.user_id === currentUserId;
+    const canDelete = isCreator || isOwnMedia;
+    
+    if (!canDelete) {
+      Alert.alert('Permission Denied', 'You can only delete your own photos.');
+      return;
+    }
+    
     Alert.alert(
       'Delete Media',
       'Are you sure you want to delete this media? This action cannot be undone.',
@@ -639,9 +659,36 @@ export const GalleryScreen = () => {
       return;
     }
 
+    // Get current user
+    const { data: sessionData } = await supabase.auth.getSession();
+    const currentUserId = sessionData?.session?.user?.id;
+
+    // Check which items the user can delete
+    const selectedMedia = media.filter(m => selectedItems.includes(m.id));
+    
+    // Filter out items the user doesn't have permission to delete
+    const itemsUserCanDelete = selectedMedia.filter(m => 
+      isCreator || m.user_id === currentUserId
+    );
+    
+    const itemsUserCannotDelete = selectedMedia.filter(m => 
+      !isCreator && m.user_id !== currentUserId
+    );
+    
+    if (itemsUserCanDelete.length === 0) {
+      Alert.alert('Permission Denied', 'You can only delete your own photos.');
+      return;
+    }
+    
+    let message = `Are you sure you want to delete ${itemsUserCanDelete.length} selected item(s)? This action cannot be undone.`;
+    
+    if (itemsUserCannotDelete.length > 0) {
+      message += `\n\nNote: ${itemsUserCannotDelete.length} item(s) will not be deleted because you don't have permission to delete them.`;
+    }
+
     Alert.alert(
       'Delete Selected Media',
-      `Are you sure you want to delete ${selectedItems.length} selected item(s)? This action cannot be undone.`,
+      message,
       [
         {
           text: 'Cancel',
@@ -653,38 +700,37 @@ export const GalleryScreen = () => {
           onPress: async () => {
             try {
               setMultiDeleteInProgress(true);
-              console.log('Starting batch deletion for', selectedItems.length, 'items');
+              console.log('Starting batch deletion for', itemsUserCanDelete.length, 'items');
               
               // Remove selected items from local state immediately
-              setMedia(prevMedia => prevMedia.filter(m => !selectedItems.includes(m.id)));
+              setMedia(prevMedia => prevMedia.filter(m => 
+                !itemsUserCanDelete.some(item => item.id === m.id)
+              ));
               
               // Process each deletion in sequence
-              for (const itemId of selectedItems) {
-                const mediaItem = media.find(m => m.id === itemId);
-                if (!mediaItem) continue;
-                
-                console.log('Deleting item:', itemId);
+              for (const item of itemsUserCanDelete) {
+                console.log('Deleting item:', item.id);
                 
                 // Delete from database
                 const { error: dbError } = await supabase
                   .from('media')
                   .delete()
-                  .eq('id', itemId);
+                  .eq('id', item.id);
                 
                 if (dbError) {
-                  console.log('Database deletion error for item', itemId, ':', dbError);
+                  console.log('Database deletion error for item', item.id, ':', dbError);
                 }
                 
                 // Try to delete from storage
                 try {
                   let storagePath = '';
-                  if (mediaItem.url.includes('https://')) {
-                    const urlParts = mediaItem.url.split('/media/');
+                  if (item.url.includes('https://')) {
+                    const urlParts = item.url.split('/media/');
                     if (urlParts.length > 1) {
                       storagePath = urlParts[1];
                     }
                   } else {
-                    storagePath = mediaItem.url;
+                    storagePath = item.url;
                   }
                   
                   if (storagePath) {
@@ -693,7 +739,7 @@ export const GalleryScreen = () => {
                       .remove([storagePath]);
                   }
                 } catch (storageError) {
-                  console.log('Storage deletion error for item', itemId, ':', storageError);
+                  console.log('Storage deletion error for item', item.id, ':', storageError);
                 }
               }
               
@@ -702,7 +748,7 @@ export const GalleryScreen = () => {
               setSelectedItems([]);
               
               // Show success message
-              Alert.alert('Success', `${selectedItems.length} item(s) removed from gallery`);
+              Alert.alert('Success', `${itemsUserCanDelete.length} item(s) removed from gallery`);
               
               // Force refresh after a delay
               setTimeout(() => {
@@ -720,116 +766,49 @@ export const GalleryScreen = () => {
     );
   };
 
-  // Completely rewritten navigation with fixed animation sequence
+  // Completely rewritten navigation with improved smooth animation
   const navigateToNextImage = () => {
-    if (!selectedMedia || filteredMedia.length <= 1) return;
-
-    const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia.id);
-    if (currentIdx < 0 || currentIdx >= filteredMedia.length - 1) return;
-
-    const nextIdx = currentIdx + 1;
-    const nextItem = filteredMedia[nextIdx];
-
-    console.log(`DIRECT NAV - Going to next image: ${currentIdx} -> ${nextIdx}`);
-
-    // First animate out current image to the left
-    Animated.timing(translateX, {
-      toValue: -width,
-      duration: 150,
-      useNativeDriver: true
-    }).start(() => {
-      // Then update the state
-      setSelectedMedia(nextItem);
-      setImageIndex(nextIdx);
+    console.log('Navigating to next image, current index:', imageIndex);
+    if (imageIndex < filteredMedia.length - 1) {
+      // Set direction for animation
+      const newIndex = imageIndex + 1;
       
-      // Reset translateX to the right edge (outside the screen)
-      translateX.setValue(width);
-      
-      // Animate in the new image from the right
+      // Animate current image off-screen to the left
       Animated.timing(translateX, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true
-      }).start();
-    });
+        toValue: -width,
+        duration: 300, // Slower animation (300ms)
+        useNativeDriver: true,
+        easing: Easing.out(Easing.ease), // Add easing function for smoother animation
+      }).start(() => {
+        // After animation completes, update the state and reset animation
+        setImageIndex(newIndex);
+        setSelectedMedia(filteredMedia[newIndex]);
+        translateX.setValue(0); // Reset position
+      });
+    }
   };
   
-  // Completely rewritten navigation with fixed animation sequence
+  // Completely rewritten navigation with improved smooth animation
   const navigateToPreviousImage = () => {
-    if (!selectedMedia || filteredMedia.length <= 1) return;
-
-    const currentIdx = filteredMedia.findIndex(m => m.id === selectedMedia.id);
-    if (currentIdx <= 0 || currentIdx >= filteredMedia.length) return;
-
-    const prevIdx = currentIdx - 1;
-    const prevItem = filteredMedia[prevIdx];
-
-    console.log(`DIRECT NAV - Going to previous image: ${currentIdx} -> ${prevIdx}`);
-
-    // First animate out current image to the right
-    Animated.timing(translateX, {
-      toValue: width,
-      duration: 150,
-      useNativeDriver: true
-    }).start(() => {
-      // Then update the state
-      setSelectedMedia(prevItem);
-      setImageIndex(prevIdx);
+    console.log('Navigating to previous image, current index:', imageIndex);
+    if (imageIndex > 0) {
+      // Set direction for animation
+      const newIndex = imageIndex - 1;
       
-      // Reset translateX to the left edge (outside the screen)
-      translateX.setValue(-width);
-      
-      // Animate in the new image from the left
+      // Animate current image off-screen to the right
       Animated.timing(translateX, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true
-      }).start();
-    });
+        toValue: width,
+        duration: 300, // Slower animation (300ms)
+        useNativeDriver: true,
+        easing: Easing.out(Easing.ease), // Add easing function for smoother animation
+      }).start(() => {
+        // After animation completes, update the state and reset animation
+        setImageIndex(newIndex);
+        setSelectedMedia(filteredMedia[newIndex]);
+        translateX.setValue(0); // Reset position
+      });
+    }
   };
-  
-  // Create a simpler pan responder for swiping with completely revamped handling
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to horizontal movement greater than 5px
-        return Math.abs(gestureState.dx) > 5;
-      },
-      onPanResponderGrant: () => {
-        // Nothing needed on grant
-      },
-      onPanResponderMove: (_, gestureState) => {
-        // Just move with the finger
-        translateX.setValue(gestureState.dx);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const { dx } = gestureState;
-        
-        // If it's a significant swipe (more than 20% of screen width)
-        if (Math.abs(dx) > width * 0.2) {
-          if (dx < 0) {
-            // Swipe left - explicitly call the same function as the next button
-            console.log('Swipe detected: LEFT - calling navigateToNextImage()');
-            navigateToNextImage();
-          } else {
-            // Swipe right - explicitly call the same function as the previous button
-            console.log('Swipe detected: RIGHT - calling navigateToPreviousImage()');
-            navigateToPreviousImage();
-          }
-        } else {
-          // Not a significant swipe, bounce back to center
-          console.log('Swipe not significant enough, bouncing back');
-          Animated.spring(translateX, {
-            toValue: 0,
-            friction: 5,
-            tension: 40,
-            useNativeDriver: true
-          }).start();
-        }
-      }
-    })
-  ).current;
   
   // Show fullscreen image with our new index tracking
   const showFullScreenImage = (item: MediaWithUser) => {
@@ -861,7 +840,7 @@ export const GalleryScreen = () => {
     setHeaderVisible(true);
   };
   
-  // Simplified fullscreen image renderer
+  // Update the renderFullScreenImage function to only allow owners to delete their photos
   const renderFullScreenImage = () => {
     if (!selectedMedia || filteredMedia.length === 0) {
       console.error('Cannot render full screen image - no selected media or empty filteredMedia');
@@ -873,6 +852,15 @@ export const GalleryScreen = () => {
     
     // Check if this media was uploaded by the event creator
     const isCreatorMedia = selectedMedia.user_id === currentEvent?.created_by;
+    
+    // Get current user ID from the session object we already have
+    const currentUserId = session?.user?.id;
+    
+    // Check if current user owns this media
+    const isOwnMedia = selectedMedia.user_id === currentUserId;
+    
+    // User can delete if they're the event creator OR if it's their own photo
+    const canDelete = isCreator || isOwnMedia;
     
     // Get the display name
     let displayName = 'Unknown User';
@@ -895,7 +883,6 @@ export const GalleryScreen = () => {
             styles.fullScreenImageContainer,
             { transform: [{ translateX }] }
           ]}
-          {...panResponder.panHandlers}
         >
           <Image 
             source={{ uri: selectedMedia.url }} 
@@ -923,6 +910,7 @@ export const GalleryScreen = () => {
               <Text style={styles.mediaInfoText}>
                 By: {displayName}
                 {isCreatorMedia && <Text style={styles.creatorTag}> (Creator)</Text>}
+                {isOwnMedia && <Text style={styles.ownPhotoTag}> (You)</Text>}
               </Text>
               <Text style={styles.mediaInfoDate}>
                 {new Date(selectedMedia.created_at).toLocaleString()}
@@ -957,7 +945,7 @@ export const GalleryScreen = () => {
                 )}
               </TouchableOpacity>
               
-              {isCreator && (
+              {canDelete && (
                 <TouchableOpacity
                   style={[styles.mediaAction, styles.deleteAction]}
                   onPress={() => deleteMedia(selectedMedia)}
@@ -1061,33 +1049,44 @@ export const GalleryScreen = () => {
     navigation.navigate('Events');
   };
 
-  // Add useEffect to apply filters when media or sortBy changes
+  // Update useEffect to apply filters when media, sortBy, or showOnlyMyPhotos changes
   useEffect(() => {
+    console.log(`Filtering media: ${media.length} items available, sort by: ${sortBy}, show only my photos: ${showOnlyMyPhotos}`);
+    
     if (media.length === 0) {
+      console.log('No media to filter, setting empty filteredMedia');
       setFilteredMedia([]);
       return;
     }
 
-    let sorted = [...media];
+    let filtered = [...media];
     
+    // First filter by user ownership if needed
+    if (showOnlyMyPhotos && session?.user) {
+      const currentUserId = session.user.id;
+      filtered = filtered.filter(item => item.user_id === currentUserId);
+    }
+    
+    // Then sort the filtered list
     switch (sortBy) {
       case 'newest':
-        sorted = sorted.sort((a, b) => 
+        filtered = filtered.sort((a, b) => 
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
         break;
       case 'oldest':
-        sorted = sorted.sort((a, b) => 
+        filtered = filtered.sort((a, b) => 
           new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
         break;
       case 'most_likes':
-        sorted = sorted.sort((a, b) => b.likes_count - a.likes_count);
+        filtered = filtered.sort((a, b) => b.likes_count - a.likes_count);
         break;
     }
     
-    setFilteredMedia(sorted);
-  }, [media, sortBy]);
+    console.log(`Setting filteredMedia with ${filtered.length} items after filtering`);
+    setFilteredMedia(filtered);
+  }, [media, sortBy, showOnlyMyPhotos, session?.user?.id]);
 
   // Add function to toggle filter modal
   const toggleFilterModal = () => {
@@ -1100,72 +1099,57 @@ export const GalleryScreen = () => {
     setFilterModalVisible(false);
   };
 
-  // Add filter modal component
+  // Update filter modal component to include "My Photos" option
   const renderFilterModal = () => {
     return (
       <Modal
-        visible={filterModalVisible}
-        transparent={true}
         animationType="slide"
-        onRequestClose={toggleFilterModal}
+        transparent={true}
+        visible={filterModalVisible}
+        onRequestClose={() => setFilterModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.filterModal}>
-            <View style={styles.filterHeader}>
-              <Text style={styles.filterTitle}>Filter Photos</Text>
-              <TouchableOpacity onPress={toggleFilterModal}>
-                <MaterialIcons name="close" size={24} color="#000" />
-              </TouchableOpacity>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Sort & Filter</Text>
+            
+            {/* Sort options */}
+            <Text style={styles.modalSectionTitle}>Sort By</Text>
+            <TouchableOpacity
+              style={[styles.sortOption, sortBy === 'newest' && styles.selectedSortOption]}
+              onPress={() => setSortBy('newest')}
+            >
+              <Text style={styles.sortOptionText}>Newest First</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortOption, sortBy === 'oldest' && styles.selectedSortOption]}
+              onPress={() => setSortBy('oldest')}
+            >
+              <Text style={styles.sortOptionText}>Oldest First</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortOption, sortBy === 'most_likes' && styles.selectedSortOption]}
+              onPress={() => setSortBy('most_likes')}
+            >
+              <Text style={styles.sortOptionText}>Most Likes</Text>
+            </TouchableOpacity>
+            
+            {/* Filter options */}
+            <Text style={styles.modalSectionTitle}>Filter Options</Text>
+            <View style={styles.filterOption}>
+              <Text style={styles.filterOptionText}>Show only my photos</Text>
+              <Switch
+                value={showOnlyMyPhotos}
+                onValueChange={setShowOnlyMyPhotos}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={showOnlyMyPhotos ? '#4630EB' : '#f4f3f4'}
+              />
             </View>
             
-            <View style={styles.filterOptions}>
-              <Text style={styles.filterSectionTitle}>Sort by</Text>
-              
-              <TouchableOpacity 
-                style={styles.filterOption} 
-                onPress={() => applyFilter('newest')}
-              >
-                <RadioButton
-                  value="newest"
-                  status={sortBy === 'newest' ? 'checked' : 'unchecked'}
-                  onPress={() => applyFilter('newest')}
-                  color={colors.primary}
-                />
-                <Text style={styles.filterOptionText}>Newest first</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.filterOption} 
-                onPress={() => applyFilter('oldest')}
-              >
-                <RadioButton
-                  value="oldest"
-                  status={sortBy === 'oldest' ? 'checked' : 'unchecked'}
-                  onPress={() => applyFilter('oldest')}
-                  color={colors.primary}
-                />
-                <Text style={styles.filterOptionText}>Oldest first</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.filterOption} 
-                onPress={() => applyFilter('most_likes')}
-              >
-                <RadioButton
-                  value="most_likes"
-                  status={sortBy === 'most_likes' ? 'checked' : 'unchecked'}
-                  onPress={() => applyFilter('most_likes')}
-                  color={colors.primary}
-                />
-                <Text style={styles.filterOptionText}>Most likes</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <TouchableOpacity 
-              style={styles.applyFilterButton}
+            <TouchableOpacity
+              style={styles.applyButton}
               onPress={() => setFilterModalVisible(false)}
             >
-              <Text style={styles.applyFilterButtonText}>Apply</Text>
+              <Text style={styles.applyButtonText}>Apply</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1415,10 +1399,10 @@ export const GalleryScreen = () => {
             <View style={styles.headerActionsContainer}>
               {/* Filter button */}
               <TouchableOpacity
-                style={styles.actionButton}
-                onPress={toggleFilterModal}
+                style={styles.filterButton}
+                onPress={() => setFilterModalVisible(true)}
               >
-                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
+                <Ionicons name="filter-outline" size={24} color="#333" />
               </TouchableOpacity>
               
               {/* Refresh button */}
@@ -1512,10 +1496,10 @@ export const GalleryScreen = () => {
             <View style={styles.headerActionsContainer}>
               {/* Filter button */}
               <TouchableOpacity
-                style={styles.actionButton}
-                onPress={toggleFilterModal}
+                style={styles.filterButton}
+                onPress={() => setFilterModalVisible(true)}
               >
-                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
+                <Ionicons name="filter-outline" size={24} color="#333" />
               </TouchableOpacity>
               
               {/* Refresh button */}
@@ -1616,10 +1600,10 @@ export const GalleryScreen = () => {
             <View style={styles.headerActionsContainer}>
               {/* Filter button */}
               <TouchableOpacity
-                style={styles.actionButton}
-                onPress={toggleFilterModal}
+                style={styles.filterButton}
+                onPress={() => setFilterModalVisible(true)}
               >
-                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
+                <Ionicons name="filter-outline" size={24} color="#333" />
               </TouchableOpacity>
             </View>
           </View>
@@ -1667,10 +1651,10 @@ export const GalleryScreen = () => {
             <View style={styles.headerActionsContainer}>
               {/* Filter button */}
               <TouchableOpacity
-                style={styles.actionButton}
-                onPress={toggleFilterModal}
+                style={styles.filterButton}
+                onPress={() => setFilterModalVisible(true)}
               >
-                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
+                <Ionicons name="filter-outline" size={24} color="#333" />
               </TouchableOpacity>
               
               {/* Refresh button */}
@@ -2356,5 +2340,92 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginTop: 16,
-  }
+  },
+  ownPhotoTag: {
+    color: '#4A90E2',
+    fontWeight: 'bold',
+  },
+  filterButton: {
+    position: 'absolute',
+    right: 20,
+    top: 20,
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '80%',
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  modalSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 10,
+    marginBottom: 5,
+  },
+  sortOption: {
+    padding: 10,
+    borderRadius: 5,
+    marginVertical: 5,
+  },
+  selectedSortOption: {
+    backgroundColor: '#e6f0ff',
+  },
+  sortOptionText: {
+    fontSize: 16,
+  },
+  filterOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  applyButton: {
+    backgroundColor: '#4630EB',
+    borderRadius: 5,
+    padding: 10,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  applyButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 }); 
