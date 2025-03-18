@@ -155,6 +155,7 @@ const styles = StyleSheet.create({
     maxWidth: 40,
     maxHeight: 40,
     marginLeft: 4,
+    borderRadius: 20,
   },
   appName: {
     color: '#FFFFFF',

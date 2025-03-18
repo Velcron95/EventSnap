@@ -123,7 +123,13 @@ export const GalleryScreen = () => {
   
   // Handle left swipe (next image)
   const handleSwipeLeft = () => {
-    if (filteredMedia.length === 0 || imageIndex >= filteredMedia.length - 1) {
+    if (filteredMedia.length === 0) {
+      console.log('No images in filtered media');
+      return;
+    }
+    
+    if (imageIndex >= filteredMedia.length - 1) {
+      console.log('Already at last image, index:', imageIndex);
       // Can't go further, bounce back
       Animated.spring(translateX, {
         toValue: 0,
@@ -134,6 +140,8 @@ export const GalleryScreen = () => {
       return;
     }
     
+    console.log('Swiping to next image, current index:', imageIndex);
+    
     // Animate current image off screen
     Animated.timing(translateX, {
       toValue: -width,
@@ -142,8 +150,14 @@ export const GalleryScreen = () => {
     }).start(() => {
       // Move to next image
       const nextIndex = imageIndex + 1;
+      console.log('Setting next index:', nextIndex);
+      
+      // Important: update both state values together
       setImageIndex(nextIndex);
-      setSelectedMedia(filteredMedia[nextIndex]);
+      if (filteredMedia[nextIndex]) {
+        setSelectedMedia(filteredMedia[nextIndex]);
+        console.log('Set new selected media:', filteredMedia[nextIndex].id);
+      }
       
       // Reset position for next image to come in from right
       translateX.setValue(width);
@@ -159,7 +173,13 @@ export const GalleryScreen = () => {
   
   // Handle right swipe (previous image)
   const handleSwipeRight = () => {
-    if (filteredMedia.length === 0 || imageIndex <= 0) {
+    if (filteredMedia.length === 0) {
+      console.log('No images in filtered media');
+      return;
+    }
+    
+    if (imageIndex <= 0) {
+      console.log('Already at first image, index:', imageIndex);
       // Can't go further, bounce back
       Animated.spring(translateX, {
         toValue: 0,
@@ -170,6 +190,8 @@ export const GalleryScreen = () => {
       return;
     }
     
+    console.log('Swiping to previous image, current index:', imageIndex);
+    
     // Animate current image off screen
     Animated.timing(translateX, {
       toValue: width,
@@ -178,8 +200,14 @@ export const GalleryScreen = () => {
     }).start(() => {
       // Move to previous image
       const prevIndex = imageIndex - 1;
+      console.log('Setting previous index:', prevIndex);
+      
+      // Important: update both state values together
       setImageIndex(prevIndex);
-      setSelectedMedia(filteredMedia[prevIndex]);
+      if (filteredMedia[prevIndex]) {
+        setSelectedMedia(filteredMedia[prevIndex]);
+        console.log('Set new selected media:', filteredMedia[prevIndex].id);
+      }
       
       // Reset position for previous image to come in from left
       translateX.setValue(-width);
