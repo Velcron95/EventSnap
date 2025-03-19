@@ -72,11 +72,8 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
       if (signUpError) {
         // Check if this is a profile creation error but account was created
         if (signUpError.message.includes('profile') && signUpError.message.includes('error')) {
-          showAlert({
-            type: 'warning',
-            title: 'Account Created with Warning',
-            message: 'Your account has been created, but there was an issue with your profile. You will receive a confirmation email. Please check your email (including spam folder) to verify your account.'
-          });
+          // Don't show any alert for profile creation errors
+          console.log('Profile creation error:', signUpError.message);
         }
         // Check if this is the email confirmation message
         else if (signUpError.message.includes('check your email for a confirmation link')) {
