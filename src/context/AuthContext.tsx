@@ -128,7 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             
           if (simpleInsertError) {
-            Alert.alert('Profile Creation Error', 'Could not create user profile. Please try signing out and back in.');
+            console.error('Profile Creation Error:', simpleInsertError.message);
           }
         }
       } else {
