@@ -96,11 +96,8 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
             }
           });
         } else {
-          showAlert({
-            type: 'error',
-            title: 'Error',
-            message: signUpError.message
-          });
+          // Error occurred but don't show any alert
+          console.log('Sign up error:', signUpError.message);
         }
       } else {
         // This would only happen if email was already confirmed
@@ -111,11 +108,8 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
         });
       }
     } catch (error) {
-      showAlert({
-        type: 'error',
-        title: 'Error',
-        message: 'An unexpected error occurred'
-      });
+      // Don't show alert for unexpected errors either
+      console.error('Unexpected error during sign up:', error);
     } finally {
       setLoading(false);
     }
