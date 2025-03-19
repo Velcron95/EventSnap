@@ -82,6 +82,10 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
             title: 'Email Verification Required',
             message: 'Your account has been created! Please check your email for a verification link. If you do not receive an email within a few minutes, check your spam folder or try a different email address.',
             confirmText: 'OK',
+            onConfirm: () => {
+              // Navigate to sign in screen after showing the alert
+              navigation.navigate('SignIn');
+            },
             cancelText: 'I didn\'t get the email',
             onCancel: () => {
               // For testing/development - in production you'd want a proper solution
@@ -101,7 +105,11 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
         showAlert({
           type: 'success',
           title: 'Account Created',
-          message: 'Your account has been created successfully. You can now sign in.'
+          message: 'Your account has been created successfully. You can now sign in.',
+          onConfirm: () => {
+            // Navigate to sign in screen
+            navigation.navigate('SignIn');
+          }
         });
       }
     } catch (error) {
