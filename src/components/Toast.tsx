@@ -24,7 +24,7 @@ export const Toast: React.FC<ToastProps> = ({
   visible, 
   message, 
   type = 'success', 
-  duration = 3000, 
+  duration = 2000, 
   onClose 
 }) => {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
-    zIndex: 1000,
+    zIndex: 10000,
   },
   content: {
     flexDirection: 'row',

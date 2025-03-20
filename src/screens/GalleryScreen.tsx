@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useLayoutEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share, BackHandler, Modal, SafeAreaView, Easing, Switch, Platform } from 'react-native';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, ActivityIndicator, Alert, Dimensions, Animated, PanResponder, StatusBar, Share, BackHandler, Modal, SafeAreaView, Easing, Switch, Platform, ImageStyle, SectionList, RefreshControl } from 'react-native';
+import { useNavigation, useRoute, useFocusEffect, useTheme } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,6 +18,12 @@ import { LoadingOverlay } from '../components/LoadingOverlay';
 import { refreshCurrentUserDisplayName } from '../lib/displayNameUtils';
 import { RadioButton } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
+import { Toast } from '../components/Toast';
+import * as ImagePicker from 'expo-image-picker';
+import { FallbackImage } from '../components/FallbackImage';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { v4 as uuidv4 } from 'uuid';
+import { HeaderBar } from '../components/HeaderBar';
 
 type GalleryScreenNavigationProp = CompositeNavigationProp<
   BottomTabNavigationProp<EventTabParamList, 'Gallery'>,
@@ -39,18 +45,73 @@ const numColumns = 3;
 const tileSize = width / numColumns;
 
 // Add "likes" to the SortOption type
-type SortOption = 'newest' | 'oldest' | 'most_likes' | 'likes';
+type SortOption = 'newest' | 'oldest' | 'most_likes' | 'by_user';
+
+// Helper function to fix Supabase URLs - focused on the specific issue
+const fixSupabaseImageUrl = (url: string): string => {
+  if (!url) return '';
+  
+  try {
+    // First, encode the URL components properly
+    const urlParts = url.split('/');
+    const fileName = urlParts[urlParts.length - 1];
+    
+    // Replace the file name part with a properly encoded version
+    urlParts[urlParts.length - 1] = encodeURIComponent(decodeURIComponent(fileName));
+    
+    return urlParts.join('/');
+  } catch (e) {
+    console.error('Error fixing URL:', e);
+    return url;
+  }
+};
+
+// Custom URL encoder to handle special characters
+const customEncodeURL = (url: string): string => {
+  if (!url) return '';
+  
+  try {
+    // Try to detect if URL is already encoded
+    if (url.includes('%')) {
+      try {
+        // Try decoding once to normalize
+        const decodedOnce = decodeURIComponent(url);
+        // Then encode it properly
+        return encodeURI(decodedOnce);
+      } catch (decodeError) {
+        // If decoding fails, the URL might be partially encoded
+        // Just encode as is
+        return encodeURI(url);
+      }
+    } else {
+      // URL is not encoded, encode it
+      return encodeURI(url);
+    }
+  } catch (error) {
+    console.error('Error in customEncodeURL:', error);
+    // Return original URL if encoding fails
+    return url;
+  }
+};
 
 export const GalleryScreen = () => {
   const navigation = useNavigation<GalleryScreenNavigationProp>();
   const route = useRoute<GalleryScreenRouteProp>();
   const { currentEvent, isCreator } = useEvent();
   const { session } = useAuth();
+  const theme = useTheme();
+  
   const [media, setMedia] = useState<MediaWithUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>(undefined);
   const [downloading, setDownloading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  
+  // Add the upload state variables
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  
+  // Other existing state
   const [selectedMedia, setSelectedMedia] = useState<MediaWithUser | null>(null);
   const [likingInProgress, setLikingInProgress] = useState(false);
   
@@ -76,7 +137,6 @@ export const GalleryScreen = () => {
 
   // Get event ID from route params or context
   const eventId = route.params?.eventId || currentEvent?.id;
-  const eventName = route.params?.eventName || currentEvent?.name;
 
   // Add new state variables for filtering
   const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -87,6 +147,102 @@ export const GalleryScreen = () => {
   
   // Add this for direct swipe handling
   const [imageIndex, setImageIndex] = useState(0);
+
+  // Add toast state
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('success');
+
+  // Add state for caching base64 images
+  const [imageCache, setImageCache] = React.useState<Record<string, string>>({});
+  
+  // Add state for grouped by user feature
+  // Add a type for the grouped media
+  type GroupedMedia = {
+    user: string;
+    userId: string;
+    data: MediaWithUser[];
+  };
+
+  // Update the state type
+  const [groupedMediaByUser, setGroupedMediaByUser] = useState<{[key: string]: GroupedMedia}>({});
+  const [isSectionList, setIsSectionList] = useState(false);
+  
+  // Create a simple placeholder image as base64 - a gray square
+  const PLACEHOLDER_IMAGE = {
+    uri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+  };
+
+  // Function to fix problematic URLs specifically for this issue
+  const fixSupabaseStorageUrl = (url: string): string => {
+    if (!url) return url;
+    
+    // Check if it's a problematic Supabase URL
+    if (url.includes('storage/v1/object/public/media/')) {
+      // Log the original URL
+      console.log('Fixing URL:', url);
+      
+      try {
+        // Pattern matching the URLs in error logs
+        const supabaseBase = url.split('/storage/v1/object/public/media/')[0];
+        const path = url.split('/storage/v1/object/public/media/')[1];
+        
+        if (!path) return url;
+        
+        // Split path by '/'
+        const pathParts = path.split('/');
+        
+        // We know the format: [eventId]/photos/[filename]
+        const eventId = pathParts[0];
+        const fileName = pathParts[pathParts.length - 1];
+        
+        // Reconstruct URL with the supabase base URL and path parts correctly
+        // Use decodeURIComponent first to avoid double-encoding
+        const decodedFileName = decodeURIComponent(fileName);
+        const encodedFileName = encodeURIComponent(decodedFileName);
+        
+        const fixedUrl = `${supabaseBase}/storage/v1/object/public/media/${eventId}/photos/${encodedFileName}`;
+        console.log('Fixed URL:', fixedUrl);
+        return fixedUrl;
+      } catch (e) {
+        console.error('Error fixing URL:', e);
+        return url;
+      }
+    }
+    
+    return url;
+  };
+
+  // Function to properly process and encode image URLs
+  const processUrl = (url: string): string => {
+    // Make sure URL is properly encoded
+    try {
+      // First decode the URL to prevent double-encoding
+      const decodedUrl = decodeURIComponent(url);
+      
+      // Parse the URL to get its components
+      const parsedUrl = new URL(decodedUrl);
+      
+      // Create a properly encoded URL by encoding each path segment separately
+      const encodedPath = parsedUrl.pathname.split('/').map(segment => 
+        encodeURIComponent(segment)
+      ).join('/');
+      
+      // Reconstruct the URL with encoded path
+      parsedUrl.pathname = encodedPath;
+      return parsedUrl.toString();
+    } catch (error) {
+      console.error('Error processing URL:', error);
+      return url; // Return original if something fails
+    }
+  };
+
+  // Function to show toast
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastVisible(true);
+  };
 
   // Add a debug effect to check isCreator
   useEffect(() => {
@@ -496,6 +652,13 @@ export const GalleryScreen = () => {
         
         console.log(`Fetched ${processedData?.length || 0} media items`);
         setMedia(processedData as MediaWithUser[]);
+        setFilteredMedia(processedData as MediaWithUser[]);
+        
+        // Log the first few media items to check URLs
+        console.log(`Fetched ${processedData.length} media items`);
+        if (processedData.length > 0) {
+          console.log(`First media item: ID: ${processedData[0].id}, URL: ${processedData[0].url}`);
+        }
       } else {
         // No media found
         setMedia([]);
@@ -508,124 +671,116 @@ export const GalleryScreen = () => {
     }
   };
 
+  // Update the downloadMedia function to use signed URLs
   const downloadMedia = async (mediaItem: MediaWithUser) => {
     try {
+      if (!mediaItem) {
+        console.error('No media item provided to downloadMedia');
+        showToast('Error: No image selected', 'error');
+        return;
+      }
+      
+      console.log('Download media started:', mediaItem.id);
       setDownloading(true);
       
+      // Explicitly show toast at the start - log for debugging
+      console.log('Setting download toast visible');
+      setToastMessage('Downloading image...');
+      setToastType('info');
+      setToastVisible(true);
+      
+      // Get a properly processed URL
+      const signedUrl = processUrl(mediaItem.url);
+      console.log(`Downloading image from: ${signedUrl}`);
+      
+      // Request permissions if not already granted
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Permission denied for media library');
+        setToastMessage('Please grant permission to save photos to your device.');
+        setToastType('error');
+        setToastVisible(true);
+        return;
+      }
+      
+      // Prepare a temporary file path
+      const fileName = signedUrl.split('/').pop() || 'image.jpg';
+      const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+      
       // Download the file
-      const fileUri = `${FileSystem.documentDirectory}${mediaItem.id}.jpg`;
-      const { uri } = await FileSystem.downloadAsync(mediaItem.url, fileUri);
+      const downloadResult = await FileSystem.downloadAsync(signedUrl, fileUri);
+      
+      if (downloadResult.status !== 200) {
+        throw new Error(`Download failed with status ${downloadResult.status}`);
+      }
       
       // Save to media library
-      const asset = await MediaLibrary.saveToLibraryAsync(uri);
+      const asset = await MediaLibrary.saveToLibraryAsync(fileUri);
       
-      Alert.alert('Success', 'Media saved to your gallery!');
+      // Success - explicitly set toast properties
+      console.log('Image saved successfully, showing success toast');
+      setToastMessage('Image saved to your device.');
+      setToastType('success');
+      setToastVisible(true);
+      console.log('Image saved:', asset);
+      
     } catch (error) {
-      console.error('Download error:', error);
-      Alert.alert('Error', 'Failed to download media');
+      console.error('Error downloading media:', error);
+      showToast('Failed to save image. Please try again.', 'error');
     } finally {
       setDownloading(false);
-      setSelectedMedia(null);
     }
   };
 
   const deleteMedia = async (mediaItem: MediaWithUser) => {
-    // Get current user
-    const { data: sessionData } = await supabase.auth.getSession();
-    const currentUserId = sessionData?.session?.user?.id;
-    
-    // Check if current user has permission to delete this media
-    // They can delete if they're the event creator OR if it's their own photo
-    const isOwnMedia = mediaItem.user_id === currentUserId;
-    const canDelete = isCreator || isOwnMedia;
-    
-    if (!canDelete) {
-      Alert.alert('Permission Denied', 'You can only delete your own photos.');
-      return;
+    try {
+      // Show loading state
+      setDeleting(true);
+      console.log('Deleting media item:', mediaItem.id);
+      
+      // Extract the filename from the URL
+      const urlParts = mediaItem.url.split('/');
+      const fileName = urlParts[urlParts.length - 1];
+      const filePath = `${eventId}/photos/${fileName}`;
+      
+      console.log('Deleting from storage path:', filePath);
+      
+      // Delete from Supabase Storage
+      const { error: storageError } = await supabase.storage
+        .from('media')
+        .remove([filePath]);
+        
+      if (storageError) {
+        console.error('Error deleting from storage:', storageError);
+        Alert.alert('Error', 'Failed to delete image from storage');
+        return;
+      }
+      
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('media')
+        .delete()
+        .eq('id', mediaItem.id);
+        
+      if (dbError) {
+        console.error('Error deleting from database:', dbError);
+        Alert.alert('Error', 'Failed to delete image record from database');
+        return;
+      }
+      
+      // Update local state
+      setMedia(prevMedia => prevMedia.filter(m => m.id !== mediaItem.id));
+      setFilteredMedia(prevFilteredMedia => prevFilteredMedia.filter(m => m.id !== mediaItem.id));
+      
+      // Show success toast
+      showToast('Photo deleted successfully', 'success');
+      
+    } catch (error) {
+      console.error('Error deleting media:', error);
+      showToast('Failed to delete photo', 'error');
+    } finally {
+      setDeleting(false);
     }
-    
-    Alert.alert(
-      'Delete Media',
-      'Are you sure you want to delete this media? This action cannot be undone.',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setDeleting(true);
-              console.log('Starting deletion process for media ID:', mediaItem.id);
-              
-              // Force remove from local state immediately
-              setMedia(prevMedia => prevMedia.filter(m => m.id !== mediaItem.id));
-              setSelectedMedia(null);
-              
-              // Try to delete from database - but don't wait for it
-              console.log('Attempting database deletion, id:', mediaItem.id);
-              supabase
-                .from('media')
-                .delete()
-                .eq('id', mediaItem.id)
-                .then(({ error }) => {
-                  if (error) {
-                    console.log('Database deletion error (non-critical):', error);
-                  } else {
-                    console.log('Database deletion request sent successfully');
-                  }
-                });
-              
-              // Try to delete from storage if possible - also don't wait
-              try {
-                // Extract path from URL if it's a full URL
-                let storagePath = '';
-                if (mediaItem.url.includes('https://')) {
-                  const urlParts = mediaItem.url.split('/media/');
-                  if (urlParts.length > 1) {
-                    storagePath = urlParts[1];
-                  }
-                } else {
-                  storagePath = mediaItem.url;
-                }
-                
-                if (storagePath) {
-                  console.log('Attempting to delete from storage:', storagePath);
-                  supabase.storage
-                    .from('media')
-                    .remove([storagePath])
-                    .then(({ error }) => {
-                      if (error) {
-                        console.log('Storage deletion error (non-critical):', error);
-                      } else {
-                        console.log('Storage deletion request sent successfully');
-                      }
-                    });
-                }
-              } catch (storageError) {
-                // Just log storage errors but don't fail the operation
-                console.log('Storage deletion error (non-critical):', storageError);
-              }
-              
-              // Show success message immediately
-              Alert.alert('Success', 'Media removed from gallery');
-              
-              // Force refresh the media list after a delay
-              setTimeout(() => {
-                fetchEventMedia();
-              }, 2000);
-            } catch (error) {
-              console.error('Delete error:', error);
-              Alert.alert('Error', 'Failed to delete media');
-            } finally {
-              setDeleting(false);
-            }
-          }
-        }
-      ]
-    );
   };
 
   // Toggle selection mode
@@ -655,108 +810,64 @@ export const GalleryScreen = () => {
   // Delete multiple media items
   const deleteSelectedItems = async () => {
     if (selectedItems.length === 0) {
-      Alert.alert('No Items Selected', 'Please select at least one item to delete.');
       return;
-    }
-
-    // Get current user
-    const { data: sessionData } = await supabase.auth.getSession();
-    const currentUserId = sessionData?.session?.user?.id;
-
-    // Check which items the user can delete
-    const selectedMedia = media.filter(m => selectedItems.includes(m.id));
-    
-    // Filter out items the user doesn't have permission to delete
-    const itemsUserCanDelete = selectedMedia.filter(m => 
-      isCreator || m.user_id === currentUserId
-    );
-    
-    const itemsUserCannotDelete = selectedMedia.filter(m => 
-      !isCreator && m.user_id !== currentUserId
-    );
-    
-    if (itemsUserCanDelete.length === 0) {
-      Alert.alert('Permission Denied', 'You can only delete your own photos.');
-      return;
-    }
-    
-    let message = `Are you sure you want to delete ${itemsUserCanDelete.length} selected item(s)? This action cannot be undone.`;
-    
-    if (itemsUserCannotDelete.length > 0) {
-      message += `\n\nNote: ${itemsUserCannotDelete.length} item(s) will not be deleted because you don't have permission to delete them.`;
     }
 
     Alert.alert(
-      'Delete Selected Media',
-      message,
+      'Delete Selected',
+      `Are you sure you want to delete ${selectedItems.length} selected item(s)?`,
       [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
               setMultiDeleteInProgress(true);
-              console.log('Starting batch deletion for', itemsUserCanDelete.length, 'items');
               
-              // Remove selected items from local state immediately
-              setMedia(prevMedia => prevMedia.filter(m => 
-                !itemsUserCanDelete.some(item => item.id === m.id)
-              ));
-              
-              // Process each deletion in sequence
-              for (const item of itemsUserCanDelete) {
-                console.log('Deleting item:', item.id);
+              // Delete items one by one (not ideal, but safest)
+              for (const itemId of selectedItems) {
+                // Find the media item
+                const mediaItem = filteredMedia.find(m => m.id === itemId);
+                if (!mediaItem) continue;
+                
+                // Delete from storage
+                const urlParts = mediaItem.url.split('/');
+                const fileName = urlParts[urlParts.length - 1];
+                const filePath = `${eventId}/photos/${fileName}`;
+                
+                // Delete from storage
+                const { error: storageError } = await supabase.storage
+                  .from('media')
+                  .remove([filePath]);
+                  
+                if (storageError) {
+                  console.error('Error deleting from storage:', storageError);
+                }
                 
                 // Delete from database
                 const { error: dbError } = await supabase
                   .from('media')
                   .delete()
-                  .eq('id', item.id);
-                
-                if (dbError) {
-                  console.log('Database deletion error for item', item.id, ':', dbError);
-                }
-                
-                // Try to delete from storage
-                try {
-                  let storagePath = '';
-                  if (item.url.includes('https://')) {
-                    const urlParts = item.url.split('/media/');
-                    if (urlParts.length > 1) {
-                      storagePath = urlParts[1];
-                    }
-                  } else {
-                    storagePath = item.url;
-                  }
+                  .eq('id', itemId);
                   
-                  if (storagePath) {
-                    await supabase.storage
-                      .from('media')
-                      .remove([storagePath]);
-                  }
-                } catch (storageError) {
-                  console.log('Storage deletion error for item', item.id, ':', storageError);
+                if (dbError) {
+                  console.error('Error deleting from database:', dbError);
                 }
               }
               
-              // Exit selection mode
-              setSelectionMode(false);
+              // Clear selection and exit selection mode
               setSelectedItems([]);
+              setSelectionMode(false);
               
-              // Show success message
-              Alert.alert('Success', `${itemsUserCanDelete.length} item(s) removed from gallery`);
+              // Refresh the media list
+              await fetchEventMedia();
               
-              // Force refresh after a delay
-              setTimeout(() => {
-                fetchEventMedia();
-              }, 2000);
+              // Show success toast
+              showToast(`${selectedItems.length} items deleted successfully`, 'success');
             } catch (error) {
-              console.error('Batch delete error:', error);
-              Alert.alert('Error', 'Failed to delete some items');
+              console.error('Error deleting selected items:', error);
+              showToast('Failed to delete some items', 'error');
             } finally {
               setMultiDeleteInProgress(false);
             }
@@ -768,9 +879,10 @@ export const GalleryScreen = () => {
 
   // Replace the navigateToNextImage function with this simpler version without animation
   const navigateToNextImage = () => {
-    console.log('Navigating to next image, current index:', imageIndex);
+    console.log(`Navigating to next image, current index: ${imageIndex} of ${filteredMedia.length}, sort order: ${sortBy}`);
     if (imageIndex < filteredMedia.length - 1) {
       const newIndex = imageIndex + 1;
+      console.log(`Moving to index: ${newIndex}, image ID: ${filteredMedia[newIndex]?.id}`);
       setImageIndex(newIndex);
       setSelectedMedia(filteredMedia[newIndex]);
     }
@@ -778,295 +890,935 @@ export const GalleryScreen = () => {
 
   // Replace the navigateToPreviousImage function with this simpler version without animation
   const navigateToPreviousImage = () => {
-    console.log('Navigating to previous image, current index:', imageIndex);
+    console.log(`Navigating to previous image, current index: ${imageIndex} of ${filteredMedia.length}, sort order: ${sortBy}`);
     if (imageIndex > 0) {
       const newIndex = imageIndex - 1;
+      console.log(`Moving to index: ${newIndex}, image ID: ${filteredMedia[newIndex]?.id}`);
       setImageIndex(newIndex);
       setSelectedMedia(filteredMedia[newIndex]);
     }
   };
 
-  // Update the showFullScreenImage function to remove animation reset
+  // Update the showFullScreenImage function to use a simpler approach for saving scroll position
   const showFullScreenImage = (item: MediaWithUser) => {
-    if (filteredMedia.length === 0) {
-      console.error('Cannot show image - filteredMedia is empty');
-      return;
-    }
-    
-    const index = filteredMedia.findIndex(m => m.id === item.id);
-    console.log('showFullScreenImage - Selected index:', index, 'item ID:', item.id);
+    // Find the correct index of the item in the filteredMedia array
+    const index = filteredMedia.findIndex(media => media.id === item.id);
+    console.log(`Opening fullscreen for image ${item.id} at index ${index} of ${filteredMedia.length} total images. Current sort order: ${sortBy}`);
     
     if (index !== -1) {
       setImageIndex(index);
-      setSelectedMedia(item);
-      setFullScreenVisible(true);
-      setHeaderVisible(false);
     } else {
-      console.error('Cannot find selected media (ID:', item.id, ') in filteredMedia array');
+      console.error('Could not find image index in filteredMedia', item.id);
+      setImageIndex(0); // Default to first image if not found
     }
+    
+    setSelectedMedia(item);
+    setFullScreenVisible(true);
+    setHeaderVisible(false);
   };
 
-  // Close fullscreen image
+  // Update the closeFullScreenImage function to restore scroll position
   const closeFullScreenImage = () => {
     setFullScreenVisible(false);
     setSelectedMedia(null);
     setHeaderVisible(true);
+    
+    // Restore scroll position after a short delay to allow the list to render
+    setTimeout(() => {
+      if (isSectionList && groupedFlatListRef.current) {
+        groupedFlatListRef.current.scrollToOffset({ offset: scrollPosition, animated: false });
+      } else if (flatListRef.current) {
+        flatListRef.current.scrollToOffset({ offset: scrollPosition, animated: false });
+      }
+    }, 100);
   };
 
-  // Update the renderFullScreenImage function to only allow owners to delete their photos
-  const renderFullScreenImage = () => {
-    if (!selectedMedia || filteredMedia.length === 0) {
-      console.error('Cannot render full screen image - no selected media or empty filteredMedia');
-      return null;
+  // Function to load an image as base64 (memoized)
+  const loadImageAsBase64 = React.useCallback(async (item: MediaWithUser) => {
+    try {
+      // If we already have this image in cache, don't reload it
+      if (imageCache[item.id]) {
+        return;
+      }
+
+      console.log(`Loading image as base64: ${item.id}`);
+      
+      // Check if the URL is valid
+      if (!item.url || !item.url.startsWith('http')) {
+        console.error(`Invalid URL for image ${item.id}: ${item.url}`);
+        return;
+      }
+      
+      // Process the URL for proper encoding
+      const processedUrl = processUrl(item.url);
+      console.log(`Using processed URL: ${processedUrl}`);
+      
+      // Prepare temporary file path
+      const localFileName = `${item.id}.jpg`;
+      const localFilePath = `${FileSystem.cacheDirectory}${localFileName}`;
+      
+      // Try to download the file
+      try {
+        console.log(`Downloading image to local cache: ${processedUrl}`);
+        const downloadResult = await FileSystem.downloadAsync(
+          processedUrl,
+          localFilePath
+        );
+        
+        if (downloadResult.status !== 200) {
+          console.error(`Failed to download image: ${downloadResult.status}`);
+          return;
+        }
+        
+        console.log(`Successfully downloaded image to: ${localFilePath}`);
+        
+        // Read the file as base64
+        const base64 = await FileSystem.readAsStringAsync(localFilePath, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        // Update cache
+        setImageCache(prev => ({
+          ...prev,
+          [item.id]: `data:image/jpeg;base64,${base64}`
+        }));
+        
+        console.log(`Successfully cached image: ${item.id}`);
+      } catch (error) {
+        console.error(`Error downloading image: ${error}`);
+      }
+    } catch (error) {
+      console.error(`Failed to load image as base64: ${error}`);
+    }
+  }, [imageCache, processUrl]);
+
+  // Add this function to get image source from cache or placeholder
+  const getImageSource = React.useCallback((item: MediaWithUser) => {
+    // If we have a cached base64 version, use it
+    if (imageCache[item.id]) {
+      console.log(`Using cached image for ${item.id}`);
+      return { uri: imageCache[item.id] };
     }
     
-    const hasPrevious = imageIndex > 0;
-    const hasNext = imageIndex < filteredMedia.length - 1;
+    // Otherwise, return the placeholder and start loading the image
+    console.log(`No cached image for ${item.id}, loading and using placeholder`);
+    loadImageAsBase64(item);
+    return PLACEHOLDER_IMAGE;
+  }, [imageCache, loadImageAsBase64]);
+
+  // Restore the original renderMediaItem without the like button
+  const renderMediaItem = React.useCallback(({ item }: { item: MediaWithUser }) => {
+    const fixedUrl = fixSupabaseImageUrl(item.url);
+    console.log(`Rendering media item: ${item.id} with fixed URL: ${fixedUrl.substring(0, 100)}...`);
+    
+    // Use our custom URL encoder
+    const encodedUrl = customEncodeURL(fixedUrl);
+    console.log(`Rendering item ${item.id} with URL: ${encodedUrl.substring(0, 100)}...`);
     
     // Check if this media was uploaded by the event creator
-    const isCreatorMedia = selectedMedia.user_id === currentEvent?.created_by;
+    const isCreatorMedia = item.user_id === currentEvent?.created_by;
     
-    // Get current user ID from the session object we already have
+    // Get current user ID
     const currentUserId = session?.user?.id;
     
     // Check if current user owns this media
-    const isOwnMedia = selectedMedia.user_id === currentUserId;
+    const isOwnMedia = item.user_id === currentUserId;
     
     // User can delete if they're the event creator OR if it's their own photo
     const canDelete = isCreator || isOwnMedia;
     
-    // Get the display name
+    // Get the display name to show
     let displayName = 'Unknown User';
     
     // If it's the creator's media, use the creator_display_name from the event
     if (isCreatorMedia && currentEvent?.creator_display_name) {
       displayName = currentEvent.creator_display_name;
     } 
-    // Use the display name from the media item
-    else if (selectedMedia.user?.display_name) {
-      displayName = selectedMedia.user.display_name;
+    // Otherwise use the display name from the media item
+    else if (item.user?.display_name) {
+      displayName = item.user.display_name;
+    }
+
+    // Define the image element
+    const imageElement = (
+      <Image 
+        source={{ uri: encodedUrl }}
+        style={{
+          width: '100%',
+          height: '100%',
+          backgroundColor: '#f0f0f0',
+        }}
+        resizeMode="cover"
+        onLoad={() => console.log(`Image loaded: ${item.id}`)}
+        onError={(e) => console.error(`Image error: ${item.id}`, e.nativeEvent)}
+      />
+    );
+    
+    if (selectionMode) {
+      // Selection mode rendering...
+      const isSelected = selectedItems.includes(item.id);
+      
+      // Only allow selection of items user can delete
+      const canSelect = isCreator || isOwnMedia;
+      
+      // If user can't select this item, show it without selection capability
+      if (!canSelect) {
+        return (
+          <TouchableOpacity 
+            style={styles.mediaItem}
+            onPress={() => showFullScreenImage(item)}
+          >
+            {imageElement}
+            {item.likes_count > 0 && (
+              <View style={styles.likesCountBadge}>
+                <MaterialIcons name="favorite" size={12} color="#fff" />
+                <Text style={styles.likesCountText}>{item.likes_count}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        );
+      }
+      
+      return (
+        <TouchableOpacity 
+          style={[
+            styles.mediaItem, 
+            isSelected && styles.selectedMediaItem
+          ]}
+          onPress={() => toggleItemSelection(item.id)}
+        >
+          {imageElement}
+          {isSelected && (
+            <View style={styles.selectionOverlay}>
+              <MaterialIcons name="check-circle" size={24} color="#007AFF" />
+            </View>
+          )}
+          {item.likes_count > 0 && (
+            <View style={styles.likesCountBadge}>
+              <MaterialIcons name="favorite" size={12} color="#fff" />
+              <Text style={styles.likesCountText}>{item.likes_count}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      );
     }
     
     return (
-      <View style={styles.fullScreenContainer}>
+      <TouchableOpacity 
+        style={styles.mediaItem}
+        onPress={() => showFullScreenImage(item)}
+        onLongPress={() => {
+          console.log('onLongPress triggered, canDelete:', canDelete);
+          // Only allow entering selection mode if user can delete this item
+          if (canDelete) {
+            toggleSelectionMode();
+            toggleItemSelection(item.id);
+          }
+        }}
+        delayLongPress={500}
+      >
+        {imageElement}
+        <View style={styles.mediaAttributionStrip}>
+          <Text style={styles.mediaAttributionText} numberOfLines={1}>
+            by: {displayName}
+          </Text>
+        </View>
+        {item.likes_count > 0 && (
+          <View style={styles.likesCountBadge}>
+            <MaterialIcons name="favorite" size={12} color="#fff" />
+            <Text style={styles.likesCountText}>{item.likes_count}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }, [
+    selectionMode, 
+    selectedItems, 
+    currentEvent, 
+    isCreator, 
+    session?.user?.id, 
+    showFullScreenImage, 
+    toggleItemSelection, 
+    toggleSelectionMode,
+    imageCache, // Add this dependency since we use getImageSource which uses imageCache
+    customEncodeURL
+  ]);
+
+  // Fix the handleUploadImages function using the working implementation from CameraScreen
+  const handleUploadImages = async () => {
+    if (!eventId || !session?.user) {
+      Alert.alert('Error', 'You must be logged in and have an active event to upload images');
+      return;
+    }
+
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Permission to access gallery was denied');
+        return;
+      }
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        exif: false,
+        allowsEditing: false,
+      });
+      
+      if (!result.canceled && result.assets.length > 0) {
+        setUploadingImages(true);
+        setUploadProgress(0);
+        
+        const totalImages = result.assets.length;
+        let successfulUploads = 0;
+        let failedUploads = 0;
+
+        showToast(`Uploading ${totalImages} images...`, 'info');
+
+        for (let i = 0; i < result.assets.length; i++) {
+          const asset = result.assets[i];
+          try {
+            console.log(`Processing image ${i+1}/${totalImages}`);
+            
+            // Standardize image size
+            const resizedImage = await ImageManipulator.manipulateAsync(
+              asset.uri,
+              [{ resize: { width: 1080, height: 1350 } }],
+              { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+            );
+            
+            // Convert to base64
+            const base64 = await FileSystem.readAsStringAsync(resizedImage.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            
+            // Generate unique filename and path
+            const fileExt = 'jpg';
+            const fileName = `${session.user.id}_${Date.now()}_${i}.${fileExt}`;
+            const filePath = `${eventId}/${fileName}`;
+            
+            // Upload to Supabase Storage using the same method as CameraScreen
+            console.log('Uploading to Supabase storage...');
+            const { data, error } = await supabase.storage
+              .from('media')
+              .upload(filePath, decode(base64), {
+                contentType: `image/${fileExt}`,
+                upsert: true
+              });
+              
+            if (error) {
+              console.error('Supabase storage upload error:', error);
+              throw error;
+            }
+            
+            // Get the public URL
+            const { data: publicURLData } = supabase.storage
+              .from('media')
+              .getPublicUrl(filePath);
+              
+            const publicURL = publicURLData.publicUrl;
+            
+            // Add entry to the media table
+            const { error: dbError } = await supabase
+              .from('media')
+              .insert({
+                event_id: eventId,
+                user_id: session.user.id,
+                url: publicURL,
+                type: 'photo',
+              });
+              
+            if (dbError) {
+              console.error('Database insert error:', dbError);
+              throw dbError;
+            }
+            
+            successfulUploads++;
+            setUploadProgress((successfulUploads / totalImages) * 100);
+            
+          } catch (error) {
+            console.error(`Error uploading image ${i+1}/${totalImages}:`, error);
+            failedUploads++;
+          }
+        }
+        
+        if (successfulUploads > 0) {
+          showToast(`Uploaded ${successfulUploads} of ${totalImages} images${failedUploads > 0 ? `, ${failedUploads} failed` : ''}`, 'success');
+          fetchEventMedia(); // Refresh the gallery
+        } else {
+          showToast('All uploads failed. Please try again.', 'error');
+        }
+      }
+    } catch (error) {
+      console.error('Error uploading images:', error);
+      showToast('Failed to upload images', 'error');
+    } finally {
+      setUploadingImages(false);
+      setUploadProgress(0);
+    }
+  };
+
+  // Add the decode function from CameraScreen
+  const decode = (base64: string): Uint8Array => {
+    const binaryString = window.atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  };
+
+  // Fix the standardizeImage function to use the proper API
+  const standardizeImage = async (uri: string): Promise<string> => {
+    try {
+      // Use manipulateAsync without checking dimensions first
+      const resizedImage = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1080, height: 1350 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      
+      return resizedImage.uri;
+    } catch (error) {
+      console.error('Error standardizing image:', error);
+      return uri; // Return original if processing fails
+    }
+  };
+
+  // Helper function to check if an image URL is accessible
+  const checkImageUrl = async (url: string): Promise<boolean> => {
+    try {
+      console.log(`Checking URL accessibility: ${url}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(url, { 
+        method: 'HEAD',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      const isOk = response.ok;
+      console.log(`URL check result: ${isOk ? 'Accessible' : 'Not accessible'}`);
+      return isOk;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log(`URL check error: ${errorMessage}`);
+      return false;
+    }
+  };
+
+  // Add a test upload function for debugging
+  const handleDebugUpload = async () => {
+    if (!eventId || !session?.user) {
+      Alert.alert('Error', 'You must be logged in and have an active event to upload images');
+      return;
+    }
+
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Permission to access gallery was denied');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: false, // Only pick one image for testing
+        quality: 1.0,
+        exif: false,
+        allowsEditing: true, // Allow cropping for testing
+        base64: true, // Add this to get base64 data directly
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setUploadingImages(true);
+        
+        Alert.alert('Debug Upload', 'Starting debug upload with one image');
+        
+        console.log('DEBUG UPLOAD - Selected asset:');
+        console.log(`URI: ${asset.uri}`);
+        console.log(`Width: ${asset.width}, Height: ${asset.height}`);
+        console.log(`Type: ${asset.type || 'unknown'}`);
+        console.log(`FileSize: ${asset.fileSize ? (asset.fileSize / 1024 / 1024).toFixed(2) + 'MB' : 'Unknown'}`);
+        console.log(`Has base64: ${!!asset.base64}`);
+        
+        // Use a simple filename and path
+        const fileName = `debug_${Date.now()}.jpg`;
+        const filePath = `${eventId}/photos/${fileName}`;
+        
+        console.log(`Debug filename: ${fileName}`);
+        console.log(`Debug filepath: ${filePath}`);
+        
+        try {
+          let blob;
+          // If we have base64 data, use it directly
+          if (asset.base64) {
+            // Create blob from base64
+            const byteCharacters = atob(asset.base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            blob = new Blob([byteArray], { type: 'image/jpeg' });
+            
+            // Save in cache immediately
+            const base64Uri = `data:image/jpeg;base64,${asset.base64}`;
+            console.log('Saving in local cache immediately');
+          } else {
+            // Fetch as blob if base64 not available
+            console.log('Fetching as blob...');
+            const response = await fetch(asset.uri);
+            blob = await response.blob();
+          }
+          
+          console.log(`Blob created, size: ${blob.size} bytes, type: ${blob.type || 'unknown'}`);
+          
+          // Upload directly
+          console.log('Uploading to Supabase...');
+          const { data, error } = await supabase.storage
+            .from('media')
+            .upload(filePath, blob, {
+              contentType: 'image/jpeg',
+              upsert: true,
+            });
+          
+          if (error) {
+            console.error('Upload error:', error);
+            throw error;
+          }
+          
+          console.log('Upload successful, data:', data);
+          
+          // Get public URL
+          console.log('Getting public URL...');
+          const { data: urlData } = await supabase.storage
+            .from('media')
+            .getPublicUrl(filePath);
+          
+          if (!urlData) {
+            console.error('No data returned when getting public URL');
+            throw new Error('Failed to get public URL');
+          }
+          
+          const publicUrl = urlData.publicUrl;
+          console.log('Public URL:', publicUrl);
+          
+          // Create a new record for database
+          const newMediaId = `debug_${Date.now()}`;
+          
+          // If we have base64 data, save it to cache immediately
+          if (asset.base64) {
+            // Cache the image so it displays immediately
+            setImageCache(prev => ({
+              ...prev,
+              [newMediaId]: `data:image/jpeg;base64,${asset.base64}`
+            }));
+          }
+          
+          // Save to database
+          console.log('Saving to database...');
+          const { error: dbError } = await supabase
+            .from('media')
+            .insert({
+              id: newMediaId, // Use our generated ID so we can show it immediately
+              event_id: eventId,
+              user_id: session.user.id,
+              url: publicUrl,
+              type: 'photo',
+            });
+          
+          if (dbError) {
+            console.error('Database insert error:', dbError);
+            throw dbError;
+          }
+          
+          console.log('Debug upload complete - refreshing gallery');
+          fetchEventMedia();
+          Alert.alert('Debug Upload', 'Upload completed successfully!');
+          
+        } catch (error) {
+          console.error('Debug upload error:', error);
+          Alert.alert('Debug Upload Error', `Error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error in debug upload:', error);
+      Alert.alert('Debug Upload Error', 'Failed to complete debug upload');
+    } finally {
+      setUploadingImages(false);
+    }
+  };
+
+  // Load images as they enter the visible area
+  React.useEffect(() => {
+    if (filteredMedia.length === 0) return;
+    
+    console.log(`Loading ${Math.min(5, filteredMedia.length)} initial images...`);
+    
+    // Load first few images immediately
+    const initialImages = filteredMedia.slice(0, 5);
+    initialImages.forEach(item => {
+      loadImageAsBase64(item);
+    });
+  }, [filteredMedia, loadImageAsBase64]);
+
+  // Debug effect to track imageCache changes
+  React.useEffect(() => {
+    console.log(`[DEBUG] imageCache updated, entries: ${Object.keys(imageCache).length}`);
+    // Uncomment the next line to see all cache keys
+    // console.log(`[DEBUG] imageCache keys: ${Object.keys(imageCache).join(', ')}`);
+  }, [imageCache]);
+
+  // Add these state variables at the component level
+  const [fullscreenLikeStatus, setFullscreenLikeStatus] = useState<Record<string, boolean>>({});
+  const [fullscreenLikesCount, setFullscreenLikesCount] = useState<Record<string, number>>({});
+
+  // Update these when selectedMedia changes
+  useEffect(() => {
+    if (selectedMedia) {
+      setFullscreenLikeStatus(prev => ({
+        ...prev,
+        [selectedMedia.id]: selectedMedia.user_has_liked
+      }));
+      setFullscreenLikesCount(prev => ({
+        ...prev,
+        [selectedMedia.id]: selectedMedia.likes_count
+      }));
+    }
+  }, [selectedMedia]);
+
+  // Fix fullscreen and download button implementation
+  const renderFullScreenImage = () => {
+    if (!fullScreenVisible || !selectedMedia) return null;
+    
+    // Local function for showing toast in fullscreen context
+    const showFullscreenToast = (msg: string, tp: 'success' | 'error' | 'info' = 'success') => {
+      console.log('FULLSCREEN TOAST:', msg, tp);
+      setToastMessage(msg);
+      setToastType(tp);
+      setToastVisible(true);
+    };
+    
+    return (
+      <View style={styles.absoluteFullscreen}>
         <StatusBar hidden />
         
-        <View style={[styles.fullScreenImageContainer, { backgroundColor: 'black' }]}>
+        <View style={styles.centeredImageContainer}>
           <Image 
-            source={{ uri: selectedMedia.url }} 
-            style={styles.fullScreenImage}
+            source={{ uri: processImageUrl(selectedMedia.url) }}
+            style={styles.trueFullscreenImage}
             resizeMode="contain"
-            fadeDuration={100}
           />
         </View>
         
-        <View style={styles.fullScreenOverlay}>
-          <View style={styles.fullScreenHeader}>
-            <TouchableOpacity 
-              style={styles.closeButton}
-              onPress={closeFullScreenImage}
-            >
-              <MaterialIcons name="close" size={24} color="#fff" />
-            </TouchableOpacity>
-            
-            <Text style={styles.imageCounter}>
-              {imageIndex + 1} / {filteredMedia.length}
+        {/* Close button */}
+        <TouchableOpacity 
+          style={styles.closeButtonTopLeft}
+          onPress={closeFullScreenImage}
+        >
+          <MaterialIcons name="close" size={32} color="#FFFFFF" />
+        </TouchableOpacity>
+        
+        {/* Image counter */}
+        <View style={styles.imageCounterContainer}>
+          <Text style={styles.imageCounter}>
+            {imageIndex + 1} / {filteredMedia.length}
+          </Text>
+        </View>
+        
+        {/* Navigation arrows */}
+        {imageIndex > 0 && (
+          <TouchableOpacity 
+            style={[styles.navButton, styles.prevButton]}
+            onPress={navigateToPreviousImage}
+          >
+            <MaterialIcons name="chevron-left" size={40} color="#fff" />
+          </TouchableOpacity>
+        )}
+        
+        {imageIndex < filteredMedia.length - 1 && (
+          <TouchableOpacity 
+            style={[styles.navButton, styles.nextButton]}
+            onPress={navigateToNextImage}
+          >
+            <MaterialIcons name="chevron-right" size={40} color="#fff" />
+          </TouchableOpacity>
+        )}
+        
+        {/* Toast for the fullscreen view */}
+        <Toast
+          visible={toastVisible}
+          message={toastMessage}
+          type={toastType}
+          duration={2000}
+          onClose={() => setToastVisible(false)}
+        />
+        
+        {/* Bottom action bar */}
+        <View style={styles.fullScreenFooter}>
+          <View style={styles.mediaInfo}>
+            <Text style={styles.mediaInfoText}>
+              By: {selectedMedia.user?.display_name || 'Unknown User'}
+            </Text>
+            <Text style={styles.mediaInfoDate}>
+              {new Date(selectedMedia.created_at).toLocaleString()}
             </Text>
           </View>
           
-          <View style={styles.fullScreenFooter}>
-            <View style={styles.mediaInfo}>
-              <Text style={styles.mediaInfoText}>
-                By: {displayName}
-              </Text>
-              <Text style={styles.mediaInfoDate}>
-                {new Date(selectedMedia.created_at).toLocaleString()}
-              </Text>
-            </View>
+          <View style={styles.mediaActions}>
+            {/* Like button */}
+            <TouchableOpacity 
+              style={[styles.mediaAction, selectedMedia.user_has_liked && styles.likedAction]}
+              onPress={() => {
+                const likeHandler = async () => {
+                  try {
+                    if (!session?.user) {
+                      showToast('You must be logged in to like photos', 'error');
+                      return;
+                    }
+                    
+                    // Toggle the like status
+                    const newLikeStatus = !selectedMedia.user_has_liked;
+                    
+                    // Update the UI immediately
+                    setSelectedMedia({
+                      ...selectedMedia,
+                      user_has_liked: newLikeStatus,
+                      likes_count: newLikeStatus 
+                        ? (selectedMedia.likes_count || 0) + 1 
+                        : Math.max(0, (selectedMedia.likes_count || 0) - 1)
+                    });
+                    
+                    // Update in the database
+                    if (newLikeStatus) {
+                      // Like
+                      await supabase
+                        .from('media_likes')
+                        .insert({
+                          media_id: selectedMedia.id,
+                          user_id: session.user.id,
+                          created_at: new Date().toISOString()
+                        });
+                    } else {
+                      // Unlike
+                      await supabase
+                        .from('media_likes')
+                        .delete()
+                        .eq('media_id', selectedMedia.id)
+                        .eq('user_id', session.user.id);
+                    }
+                    
+                    // Update main media arrays
+                    setMedia(prevMedia => 
+                      prevMedia.map(item => 
+                        item.id === selectedMedia.id 
+                          ? {
+                              ...item,
+                              user_has_liked: newLikeStatus,
+                              likes_count: newLikeStatus 
+                                ? (item.likes_count || 0) + 1 
+                                : Math.max(0, (item.likes_count || 0) - 1)
+                            } 
+                          : item
+                      )
+                    );
+                    
+                    setFilteredMedia(prevMedia => 
+                      prevMedia.map(item => 
+                        item.id === selectedMedia.id 
+                          ? {
+                              ...item,
+                              user_has_liked: newLikeStatus,
+                              likes_count: newLikeStatus 
+                                ? (item.likes_count || 0) + 1 
+                                : Math.max(0, (item.likes_count || 0) - 1)
+                            } 
+                          : item
+                      )
+                    );
+                  } catch (error) {
+                    console.error('Error toggling like:', error);
+                    showToast('Failed to update like status', 'error');
+                  }
+                };
+                
+                likeHandler();
+              }}
+            >
+              <Ionicons 
+                name={selectedMedia.user_has_liked ? "heart" : "heart-outline"} 
+                size={24} 
+                color={selectedMedia.user_has_liked ? "#ff4d4d" : "white"} 
+              />
+            </TouchableOpacity>
             
-            <View style={styles.mediaActions}>
-              <TouchableOpacity
-                style={[
-                  styles.mediaAction,
-                  selectedMedia.user_has_liked && styles.likedAction
-                ]}
-                onPress={() => handleLikeMedia(selectedMedia)}
-                disabled={likingInProgress}
+            {/* Download button - fixed implementation */}
+            <TouchableOpacity 
+              style={styles.mediaAction}
+              onPress={() => {
+                console.log("Download button pressed in fullscreen");
+                // Show a toast directly using the local function
+                showFullscreenToast('Downloading image...', 'info');
+                
+                // Then attempt to do the download (wrapped in try/catch)
+                try {
+                  downloadMedia(selectedMedia);
+                } catch (error) {
+                  console.error('Error in fullscreen download:', error);
+                  showFullscreenToast('Download failed', 'error');
+                }
+              }}
+            >
+              <MaterialIcons name="file-download" size={24} color="white" />
+            </TouchableOpacity>
+            
+            {/* Delete button (only shown if user can delete) */}
+            {(isCreator || (session?.user && selectedMedia.user_id === session.user.id)) && (
+              <TouchableOpacity 
+                style={[styles.mediaAction, styles.deleteAction]}
+                onPress={() => {
+                  Alert.alert(
+                    'Delete Photo',
+                    'Are you sure you want to delete this photo?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { 
+                        text: 'Delete', 
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await deleteMedia(selectedMedia);
+                            closeFullScreenImage();
+                          } catch (error) {
+                            console.error('Error deleting media:', error);
+                            showToast('Failed to delete photo', 'error');
+                          }
+                        }
+                      }
+                    ]
+                  );
+                }}
               >
-                <MaterialIcons 
-                  name={selectedMedia.user_has_liked ? "favorite" : "favorite-border"} 
-                  size={24} 
-                  color="#fff" 
-                />
+                <MaterialIcons name="delete" size={24} color="white" />
               </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={styles.mediaAction}
-                onPress={() => downloadMedia(selectedMedia)}
-                disabled={downloading}
-              >
-                {downloading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <MaterialIcons name="file-download" size={24} color="#fff" />
-                )}
-              </TouchableOpacity>
-              
-              {canDelete && (
-                <TouchableOpacity
-                  style={[styles.mediaAction, styles.deleteAction]}
-                  onPress={() => deleteMedia(selectedMedia)}
-                  disabled={deleting}
-                >
-                  {deleting ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <MaterialIcons name="delete" size={24} color="#fff" />
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
+            )}
           </View>
-          
-          {hasPrevious && (
-            <TouchableOpacity 
-              style={[styles.navButton, styles.prevButton]}
-              onPress={navigateToPreviousImage}
-              hitSlop={{ top: 30, bottom: 30, left: 30, right: 30 }}
-            >
-              <MaterialIcons name="chevron-left" size={40} color="#fff" />
-            </TouchableOpacity>
-          )}
-          
-          {hasNext && (
-            <TouchableOpacity 
-              style={[styles.navButton, styles.nextButton]}
-              onPress={navigateToNextImage}
-              hitSlop={{ top: 30, bottom: 30, left: 30, right: 30 }}
-            >
-              <MaterialIcons name="chevron-right" size={40} color="#fff" />
-            </TouchableOpacity>
-          )}
         </View>
       </View>
     );
   };
 
-  const handleDownloadAllPhotos = async () => {
-    try {
-      // Request permissions if not already granted
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please grant permission to save photos to your device.');
-        return;
+  // Add a proper applyFilters function to sort and filter media
+  useEffect(() => {
+    if (media.length > 0) {
+      // Start with all media
+      let filtered = [...media];
+      
+      // Filter by user if needed
+      if (showOnlyMyPhotos && session?.user) {
+        filtered = filtered.filter(item => item.user_id === session.user.id);
       }
-
-      setDownloadingAll(true);
       
-      // Create a temporary directory to store all images
-      const tempDir = FileSystem.cacheDirectory + 'event_photos/';
-      await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true }).catch(() => {});
-      
-      // Show progress alert
-      Alert.alert(
-        'Downloading Photos',
-        `Downloading ${filteredMedia.length} photos. This may take a while.`,
-        [{ text: 'OK' }]
-      );
-      
-      // Download each photo
-      const downloadPromises = filteredMedia.map(async (item, index) => {
-        try {
-          const fileName = `photo_${index + 1}.jpg`;
-          const fileUri = tempDir + fileName;
+      // Check if we're using the section list (grouped by user)
+      if (sortBy === 'by_user') {
+        setIsSectionList(true);
+        
+        // Group photos by user_id
+        const grouped: {[key: string]: {user: string, userId: string, data: MediaWithUser[]}} = {};
+        
+        filtered.forEach(item => {
+          const userId = item.user_id || 'unknown';
+          const displayName = item.user?.display_name || 'Unknown User';
           
-          // Download the file
-          await FileSystem.downloadAsync(item.url, fileUri);
+          // Create an entry for this user if it doesn't exist
+          if (!grouped[userId]) {
+            grouped[userId] = {
+              user: displayName,
+              userId: userId,
+              data: []
+            };
+          }
           
-          // Save to media library
-          await MediaLibrary.saveToLibraryAsync(fileUri);
-          
-          return fileUri;
-        } catch (error) {
-          console.error(`Error downloading photo ${index + 1}:`, error);
-          return null;
+          // Add the photo to this user's group
+          grouped[userId].data.push(item);
+        });
+        
+        // Sort photos within each group by newest first
+        Object.keys(grouped).forEach(userId => {
+          grouped[userId].data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        });
+        
+        // Update the grouped state
+        setGroupedMediaByUser(grouped);
+      } else {
+        setIsSectionList(false);
+        
+        // Apply regular sorting
+        switch (sortBy) {
+          case 'newest':
+            filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            break;
+          case 'oldest':
+            filtered.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+            break;
+          case 'most_likes':
+            filtered.sort((a, b) => (b.likes_count || 0) - (a.likes_count || 0));
+            break;
+          default:
+            // Default to newest first
+            filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         }
-      });
+      }
       
-      const downloadedFiles = await Promise.all(downloadPromises);
-      const successfulDownloads = downloadedFiles.filter(uri => uri !== null);
-      
-      // Show completion alert
-      Alert.alert(
-        'Download Complete',
-        `Successfully downloaded ${successfulDownloads.length} of ${filteredMedia.length} photos to your device.`,
-        [{ text: 'OK' }]
-      );
-      
-    } catch (error) {
-      console.error('Error downloading all photos:', error);
-      Alert.alert('Download Failed', 'There was an error downloading the photos.');
-    } finally {
-      setDownloadingAll(false);
+      // Update filtered media
+      setFilteredMedia(filtered);
     }
-  };
+  }, [media, sortBy, showOnlyMyPhotos, session?.user?.id]);
 
-  // Update all instances of the back button TouchableOpacity
+  // Handle navigation back to Events
   const handleBackPress = () => {
     navigation.navigate('Events');
   };
 
-  // Update useEffect to apply filters when media, sortBy, or showOnlyMyPhotos changes
-  useEffect(() => {
-    console.log(`Filtering media: ${media.length} items available, sort by: ${sortBy}, show only my photos: ${showOnlyMyPhotos}`);
-    
-    if (media.length === 0) {
-      console.log('No media to filter, setting empty filteredMedia');
-      setFilteredMedia([]);
-      return;
-    }
+  // Fix the renderSectionHeader function to be simpler
+  const renderSectionHeader = ({ section }: { section: { user: string, data: MediaWithUser[] } }) => (
+    <Text style={styles.sectionHeaderText}>{section.user}</Text>
+  );
 
-    let filtered = [...media];
-    
-    // First filter by user ownership if needed
-    if (showOnlyMyPhotos && session?.user) {
-      const currentUserId = session.user.id;
-      filtered = filtered.filter(item => item.user_id === currentUserId);
+  // Process image URLs for download/display
+  const processImageUrl = (url: string): string => {
+    // Make sure URL is properly encoded
+    try {
+      // First decode the URL to prevent double-encoding
+      const decodedUrl = decodeURIComponent(url);
+      
+      // Parse the URL to get its components
+      const parsedUrl = new URL(decodedUrl);
+      
+      // Create a properly encoded URL by encoding each path segment separately
+      const encodedPath = parsedUrl.pathname.split('/').map(segment => 
+        encodeURIComponent(segment)
+      ).join('/');
+      
+      // Reconstruct the URL with encoded path
+      parsedUrl.pathname = encodedPath;
+      return parsedUrl.toString();
+    } catch (error) {
+      console.error('Error processing URL:', error);
+      return url; // Return original if something fails
     }
-    
-    // Then sort the filtered list
-    switch (sortBy) {
-      case 'newest':
-        filtered = filtered.sort((a, b) => 
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-        break;
-      case 'oldest':
-        filtered = filtered.sort((a, b) => 
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-        break;
-      case 'most_likes':
-        filtered = filtered.sort((a, b) => b.likes_count - a.likes_count);
-        break;
-    }
-    
-    console.log(`Setting filteredMedia with ${filtered.length} items after filtering`);
-    setFilteredMedia(filtered);
-  }, [media, sortBy, showOnlyMyPhotos, session?.user?.id]);
+  };
 
   // Add function to toggle filter modal
   const toggleFilterModal = () => {
     setFilterModalVisible(!filterModalVisible);
   };
 
-  // Add function to apply filter
-  const applyFilter = (filter: 'newest' | 'oldest' | 'most_likes') => {
-    setSortBy(filter);
-    setFilterModalVisible(false);
-  };
-
-  // Update filter modal component to include "My Photos" option
+  // Render filter modal
   const renderFilterModal = () => {
     return (
       <Modal
@@ -1099,6 +1851,12 @@ export const GalleryScreen = () => {
             >
               <Text style={styles.sortOptionText}>Most Likes</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sortOption, sortBy === 'by_user' && styles.selectedSortOption]}
+              onPress={() => setSortBy('by_user')}
+            >
+              <Text style={styles.sortOptionText}>Group by User</Text>
+            </TouchableOpacity>
             
             {/* Filter options */}
             <Text style={styles.modalSectionTitle}>Filter Options</Text>
@@ -1124,590 +1882,385 @@ export const GalleryScreen = () => {
     );
   };
 
-  // Add this function to show a user-friendly alert about the missing table
-  const showMediaLikesTableMissingAlert = () => {
-    Alert.alert(
-      'Likes Feature Not Available',
-      'The likes feature is not available yet. Please contact the app administrator to enable this feature.',
-      [
-        {
-          text: 'OK',
-          style: 'default'
-        }
-      ]
-    );
-  };
-
-  // Add the missing handleLikeMedia function
-  const handleLikeMedia = async (mediaItem: MediaWithUser) => {
-    if (likingInProgress) return;
-    
+  // Function to handle downloading all photos
+  const handleDownloadAllPhotos = async () => {
     try {
-      setLikingInProgress(true);
-      
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        Alert.alert('Error', 'You must be logged in to like media');
+      // Request permissions if not already granted
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        showToast('Please grant permission to save photos to your device.', 'error');
         return;
       }
       
-      // Check if media_likes table exists, create it if it doesn't
-      try {
-        console.log('Checking if media_likes table exists...');
-        // Try to create the table if it doesn't exist
-        const { error: createTableError } = await supabase.rpc('create_media_likes_table_if_not_exists');
-        
-        if (createTableError) {
-          console.log('Error calling RPC function, trying direct SQL:', createTableError);
-          
-          // If RPC fails, try direct SQL (requires admin privileges)
-          const { error: sqlError } = await supabase.from('_temp_create_table').select('*').limit(1);
-          console.log('SQL check result:', sqlError ? 'Error' : 'Success');
-          
-          // If we can't create the table, we'll just try to use it anyway
-          // The user might need to ask the admin to create the table
-        }
-      } catch (tableCheckError) {
-        console.error('Error checking/creating table:', tableCheckError);
-      }
-      
-      if (mediaItem.user_has_liked) {
-        // Unlike the media
-        console.log('Unliking media:', mediaItem.id);
-        const { error } = await supabase
-          .from('media_likes')
-          .delete()
-          .eq('media_id', mediaItem.id)
-          .eq('user_id', user.id);
-          
-        if (error) {
-          console.error('Error unliking media:', error);
-          if (error.code === '42P01') { // Table doesn't exist error
-            showMediaLikesTableMissingAlert();
-            return;
+      // Show confirmation alert
+      Alert.alert(
+        'Download All Photos',
+        `Are you sure you want to download all ${filteredMedia.length} photos to your device?`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          },
+          {
+            text: 'Download',
+            onPress: async () => {
+              setDownloadingAll(true);
+              
+              // Create a temporary directory to store all images
+              const tempDir = FileSystem.cacheDirectory + 'event_photos/';
+              await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true }).catch(() => {});
+              
+              // Show info toast for download start
+              showToast(`Downloading ${filteredMedia.length} photos. This may take a while.`, 'info');
+              
+              // Download each photo
+              const downloadPromises = filteredMedia.map(async (item, index) => {
+                try {
+                  // Use cached version if available
+                  let fileUri = '';
+                  
+                  if (imageCache[item.id]) {
+                    // Generate a filename
+                    const fileName = `photo_${index + 1}.jpg`;
+                    fileUri = tempDir + fileName;
+                    
+                    // Extract base64 data
+                    const base64Data = imageCache[item.id].split('base64,')[1];
+                    
+                    // Save the file
+                    await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+                      encoding: FileSystem.EncodingType.Base64,
+                    });
+                  } else {
+                    // Download directly
+                    const fileName = `photo_${index + 1}.jpg`;
+                    fileUri = tempDir + fileName;
+                    const downloadResult = await FileSystem.downloadAsync(item.url, fileUri);
+                    
+                    if (downloadResult.status !== 200) {
+                      console.error(`Download failed for item ${index} with status ${downloadResult.status}`);
+                      return null;
+                    }
+                  }
+                  
+                  // Save to media library
+                  await MediaLibrary.saveToLibraryAsync(fileUri);
+                  
+                  return fileUri;
+                } catch (error) {
+                  console.error(`Error downloading photo ${index + 1}:`, error);
+                  return null;
+                }
+              });
+              
+              const downloadedFiles = await Promise.all(downloadPromises);
+              const successfulDownloads = downloadedFiles.filter(uri => uri !== null);
+              
+              // Show completion toast
+              showToast(`Successfully downloaded ${successfulDownloads.length} of ${filteredMedia.length} photos to your device.`, 'success');
+              
+              setDownloadingAll(false);
+            }
           }
-          throw error;
-        }
-        
-        console.log('Successfully unliked media');
-        
-        // Update local state immediately
-        setMedia(prevMedia => 
-          prevMedia.map(item => 
-            item.id === mediaItem.id 
-              ? { 
-                  ...item, 
-                  likes_count: Math.max(0, item.likes_count - 1),
-                  user_has_liked: false 
-                } 
-              : item
-          )
-        );
-        
-        // If we're viewing this media in full screen, update that too
-        if (selectedMedia?.id === mediaItem.id) {
-          setSelectedMedia({
-            ...selectedMedia,
-            likes_count: Math.max(0, selectedMedia.likes_count - 1),
-            user_has_liked: false
-          });
-        }
-      } else {
-        // Like the media
-        console.log('Liking media:', mediaItem.id);
-        const { error } = await supabase
-          .from('media_likes')
-          .insert({
-            media_id: mediaItem.id,
-            user_id: user.id
-          });
-          
-        if (error) {
-          console.error('Error liking media:', error);
-          if (error.code === '42P01') { // Table doesn't exist error
-            showMediaLikesTableMissingAlert();
-            return;
-          }
-          throw error;
-        }
-        
-        console.log('Successfully liked media');
-        
-        // Update local state immediately
-        setMedia(prevMedia => 
-          prevMedia.map(item => 
-            item.id === mediaItem.id 
-              ? { 
-                  ...item, 
-                  likes_count: item.likes_count + 1,
-                  user_has_liked: true 
-                } 
-              : item
-          )
-        );
-        
-        // If we're viewing this media in full screen, update that too
-        if (selectedMedia?.id === mediaItem.id) {
-          setSelectedMedia({
-            ...selectedMedia,
-            likes_count: selectedMedia.likes_count + 1,
-            user_has_liked: true
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error liking/unliking media:', error);
-      Alert.alert('Error', 'Failed to like/unlike media');
-    } finally {
-      setLikingInProgress(false);
-    }
-  };
-
-  // Add the missing renderMediaItem function
-  const renderMediaItem = ({ item }: { item: MediaWithUser }) => {
-    // Check if this media was uploaded by the event creator
-    const isCreatorMedia = item.user_id === currentEvent?.created_by;
-    
-    // Get current user ID
-    const currentUserId = session?.user?.id;
-    
-    // Check if current user owns this media
-    const isOwnMedia = item.user_id === currentUserId;
-    
-    // User can delete if they're the event creator OR if it's their own photo
-    const canDelete = isCreator || isOwnMedia;
-    
-    // Get the display name to show
-    let displayName = 'Unknown User';
-    
-    // If it's the creator's media, use the creator_display_name from the event
-    if (isCreatorMedia && currentEvent?.creator_display_name) {
-      displayName = currentEvent.creator_display_name;
-    } 
-    // Otherwise use the display name from the media item
-    else if (item.user?.display_name) {
-      displayName = item.user.display_name;
-    }
-    
-    if (selectionMode) {
-      // In selection mode, allow selecting but only if user has delete permission
-      const isSelected = selectedItems.includes(item.id);
-      
-      // Only allow selection of items user can delete
-      const canSelect = isCreator || isOwnMedia;
-      
-      // If user can't select this item, show it without selection capability
-      if (!canSelect) {
-        return (
-          <TouchableOpacity 
-            style={styles.mediaItem}
-            onPress={() => showFullScreenImage(item)}
-          >
-            <Image 
-              source={{ uri: item.url }} 
-              style={styles.mediaThumbnail}
-              resizeMode="cover"
-            />
-            {item.likes_count > 0 && (
-              <View style={styles.likesCountBadge}>
-                <MaterialIcons name="favorite" size={12} color="#fff" />
-                <Text style={styles.likesCountText}>{item.likes_count}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        );
-      }
-      
-      return (
-        <TouchableOpacity 
-          style={[
-            styles.mediaItem, 
-            isSelected && styles.selectedMediaItem
-          ]}
-          onPress={() => toggleItemSelection(item.id)}
-        >
-          <Image 
-            source={{ uri: item.url }} 
-            style={styles.mediaThumbnail}
-            resizeMode="cover"
-          />
-          {isSelected && (
-            <View style={styles.selectionOverlay}>
-              <MaterialIcons name="check-circle" size={24} color="#007AFF" />
-            </View>
-          )}
-          {item.likes_count > 0 && (
-            <View style={styles.likesCountBadge}>
-              <MaterialIcons name="favorite" size={12} color="#fff" />
-              <Text style={styles.likesCountText}>{item.likes_count}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+        ]
       );
+    } catch (error) {
+      console.error('Error downloading all photos:', error);
+      showToast('There was an error downloading the photos.', 'error');
+      setDownloadingAll(false);
     }
-    
-    return (
-      <TouchableOpacity 
-        style={styles.mediaItem}
-        onPress={() => showFullScreenImage(item)}
-        onLongPress={() => {
-          console.log('onLongPress triggered, canDelete:', canDelete);
-          // Only allow entering selection mode if user can delete this item
-          if (canDelete) {
-            toggleSelectionMode();
-            toggleItemSelection(item.id);
-          }
-        }}
-        delayLongPress={500}
-      >
-        <Image 
-          source={{ uri: item.url }} 
-          style={styles.mediaThumbnail}
-          resizeMode="cover"
-        />
-        <View style={styles.mediaAttributionStrip}>
-          <Text style={styles.mediaAttributionText} numberOfLines={1}>
-            by: {displayName}
-          </Text>
-        </View>
-        {item.likes_count > 0 && (
-          <View style={styles.likesCountBadge}>
-            <MaterialIcons name="favorite" size={12} color="#fff" />
-            <Text style={styles.likesCountText}>{item.likes_count}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
   };
 
-  // Modify the conditional for showing selection mode button - only show for creators or users with deletable photos
-  const userHasDeletablePhotos = React.useMemo(() => {
-    // Check if current user has any photos they can delete
-    if (!session?.user?.id) return false;
-    
-    const currentUserId = session.user.id;
-    return media.some(item => item.user_id === currentUserId);
-  }, [media, session?.user?.id]);
+  // Add the renderDebugUrlButton function
+  const renderDebugUrlButton = () => {
+    return null; // Return null so no button is shown
+  };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        {/* Modern header with gradient background */}
-        <View style={styles.modernHeader}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity 
-              style={styles.backButtonContainer}
-              onPress={handleBackPress}
-            >
-              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
-            </TouchableOpacity>
-            
-            <View style={styles.titleContainer}>
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                Loading gallery...
-              </Text>
-            </View>
-            
-            <View style={styles.headerActionsContainer}>
-              {/* Filter button in header */}
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => setFilterModalVisible(true)}
-              >
-                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              
-              {/* Refresh button */}
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={async () => {
-                  console.log('Manual refresh requested');
-                  await refreshCurrentUserDisplayName();
-                  fetchEventMedia();
-                }}
-              >
-                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading gallery...</Text>
-        </View>
-      </View>
-    );
-  }
+  // Find the convertToJpeg function and enhance it to standardize size
+  const convertToJpeg = async (uri: string) => {
+    try {
+      // Calculate target dimensions to maintain aspect ratio
+      // Always resize to a reasonable standard size
+      // Get dimensions using Image.getSize
+      return new Promise<string>((resolve, reject) => {
+        Image.getSize(uri, (width, height) => {
+          // Calculate target size to maintain aspect ratio
+          let targetWidth = 1080;  // Standard width
+          let targetHeight = 1350; // Standard height
+          
+          // Adjust to maintain aspect ratio
+          const aspectRatio = width / height;
+          if (aspectRatio > 1) {
+            // Landscape image
+            targetHeight = Math.round(targetWidth / aspectRatio);
+          } else {
+            // Portrait image
+            targetWidth = Math.round(targetHeight * aspectRatio);
+          }
+          
+          // Perform the actual resizing
+          ImageManipulator.manipulateAsync(
+            uri,
+            [{ resize: { width: targetWidth, height: targetHeight } }],
+            { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+          ).then(result => {
+            console.log(`Standardized image size to ${targetWidth}x${targetHeight}`);
+            resolve(result.uri);
+          }).catch(error => {
+            console.error('Failed to resize image:', error);
+            // If resize fails, return the original
+            resolve(uri);
+          });
+        }, (error) => {
+          console.error('Failed to get image dimensions:', error);
+          // If we can't get dimensions, use ImageManipulator without specific dimensions
+          ImageManipulator.manipulateAsync(
+            uri,
+            [],
+            { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+          ).then(result => {
+            resolve(result.uri);
+          }).catch(err => {
+            console.error('Failed to convert image:', err);
+            resolve(uri);
+          });
+        });
+      });
+    } catch (error) {
+      console.error('Error in convertToJpeg:', error);
+      return uri; // Return original URI if anything fails
+    }
+  };
 
-  if (error) {
-    return (
-      <View style={styles.container}>
-        {/* Modern header with gradient background */}
-        <View style={styles.modernHeader}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity 
-              style={styles.backButtonContainer}
-              onPress={handleBackPress}
-            >
-              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
-            </TouchableOpacity>
-            
-            <View style={styles.titleContainer}>
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                Error loading gallery
-              </Text>
-            </View>
-            
-            <View style={styles.headerActionsContainer}>
-              {/* Filter button in header */}
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => setFilterModalVisible(true)}
-              >
-                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              
-              {/* Refresh button */}
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={async () => {
-                  console.log('Manual refresh requested');
-                  await refreshCurrentUserDisplayName();
-                  fetchEventMedia();
-                }}
-              >
-                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity 
-            style={styles.retryButton}
-            onPress={fetchEventMedia}
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-        {renderFilterModal()}
-      </View>
-    );
-  }
+  // Add these state variables
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  if (filteredMedia.length === 0) {
-    return (
-      <View style={styles.container}>
-        {/* Modern header with gradient background */}
-        <View style={styles.modernHeader}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity 
-              style={styles.backButtonContainer}
-              onPress={handleBackPress}
-            >
-              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
-            </TouchableOpacity>
-            
-            <View style={styles.titleContainer}>
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
-              </Text>
-            </View>
-            
-            <View style={styles.headerActionsContainer}>
-              {/* Filter button in header */}
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => setFilterModalVisible(true)}
-              >
-                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              
-              {/* Refresh button */}
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={async () => {
-                  console.log('Manual refresh requested');
-                  await refreshCurrentUserDisplayName();
-                  fetchEventMedia();
-                }}
-              >
-                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-        <View style={styles.emptyContainer}>
-          <MaterialIcons name="photo-library" size={64} color="#8E8E93" />
-          <Text style={styles.emptyText}>No photos or videos yet</Text>
-          <Text style={styles.emptySubtext}>Take some photos to see them here!</Text>
-          <TouchableOpacity 
-            style={styles.cameraButton}
-            onPress={() => {
-              console.log('Navigating to Camera with eventId:', eventId);
-              navigation.navigate('Camera', { eventId });
-            }}
-          >
-            <Text style={styles.cameraButtonText}>Go to Camera</Text>
-          </TouchableOpacity>
-        </View>
-        {renderFilterModal()}
-      </View>
-    );
-  }
+  // Add refresh handler function
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchEventMedia();
+    setIsRefreshing(false);
+  };
 
-  console.log('Render state - selectionMode:', selectionMode, 'isCreator:', isCreator);
+  // Add this state variable
+  const [showLoadMorePhotos, setShowLoadMorePhotos] = useState(false);
 
+  // Add a ref to track the scroll position
+  const flatListRef = useRef<FlatList<any>>(null);
+  const groupedFlatListRef = useRef<FlatList<any>>(null);
+  const [scrollPosition, setScrollPosition] = useState(0);
+
+  // Position fullscreen at root level
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.container}>
-        {/* Modern header with gradient background */}
-        <View style={styles.modernHeader}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity 
-              style={styles.backButtonContainer}
-              onPress={handleBackPress}
-            >
-              <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
-            </TouchableOpacity>
-            
-            <View style={styles.titleContainer}>
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
-                {selectionMode && ` • ${selectedItems.length} selected`}
+    <>
+      <HeaderBar />
+      
+      <View style={{flex: 1}}>
+        <SafeAreaView style={styles.container}>
+          {/* Main gallery content */}
+          {headerVisible && (
+            <View style={styles.modernHeader}>
+              <View style={styles.headerContent}>
+                <TouchableOpacity 
+                  style={styles.backButtonContainer}
+                  onPress={handleBackPress}
+                >
+                  <MaterialIcons name="arrow-back" size={28} color="#FFFFFF" />
+                </TouchableOpacity>
+                
+                <View style={styles.titleContainer}>
+                  <Text style={styles.headerSubtitle} numberOfLines={1}>
+                    {`${filteredMedia.length} ${Number(filteredMedia.length) === 1 ? "photo" : "photos"}`}
+                    {selectionMode && ` • ${selectedItems.length} selected`}
+                  </Text>
+                </View>
+                
+                {/* Restore the original header with download all button */}
+                <View style={styles.headerActionsContainer}>
+                  {!selectionMode ? (
+                    <>
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={toggleFilterModal}
+                      >
+                        <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={handleUploadImages}
+                      >
+                        <MaterialIcons name="upload-file" size={24} color="#FFFFFF" />
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={handleDownloadAllPhotos}
+                      >
+                        <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
+                      </TouchableOpacity>
+                      
+                      {isCreator && (
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={toggleSelectionMode}
+                        >
+                          <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={() => {
+                          setSelectionMode(false);
+                          setSelectedItems([]);
+                        }}
+                      >
+                        <MaterialIcons name="close" size={24} color="#FFFFFF" />
+                      </TouchableOpacity>
+                      
+                      {selectedItems.length > 0 && (
+                        <TouchableOpacity
+                          style={[styles.actionButton, styles.deleteButton]}
+                          onPress={deleteSelectedItems}
+                          disabled={multiDeleteInProgress}
+                        >
+                          {multiDeleteInProgress ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                          ) : (
+                            <MaterialIcons name="delete" size={24} color="#FFFFFF" />
+                          )}
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  )}
+                </View>
+              </View>
+            </View>
+          )}
+          
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.loadingText}>Loading media...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity 
+                style={styles.retryButton}
+                onPress={fetchEventMedia}
+              >
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : filteredMedia.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <MaterialIcons name="photo-library" size={64} color="#8E8E93" />
+              <Text style={styles.emptyText}>No photos or videos yet</Text>
+              <Text style={styles.emptySubtext}>Take photos or upload from your gallery</Text>
+              
+              <View style={{flexDirection: 'column', marginTop: 20}}>
+                <TouchableOpacity
+                  style={styles.cameraButton}
+                  onPress={() => navigation.navigate('Camera', { eventId })}
+                >
+                  <MaterialIcons name="camera-alt" size={24} color="#FFFFFF" style={{marginRight: 8}} />
+                  <Text style={styles.cameraButtonText}>Take Photos</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+              {isSectionList ? (
+                <FlatList
+                  key="groupedList"
+                  data={Object.values(groupedMediaByUser)}
+                  renderItem={({ item }) => (
+                    <View>
+                      <Text style={styles.sectionHeaderText}>{item.user}</Text>
+                      <FlatList
+                        data={item.data}
+                        renderItem={renderMediaItem}
+                        keyExtractor={(item) => item.id}
+                        numColumns={numColumns}
+                        scrollEnabled={false}
+                        contentContainerStyle={styles.mediaGrid}
+                      />
+                    </View>
+                  )}
+                  keyExtractor={(item) => item.userId || 'unknown'}
+                  contentContainerStyle={styles.mediaList}
+                  refreshControl={
+                    <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
+                  }
+                  ListFooterComponent={<View style={{ height: 90 }} />}
+                />
+              ) : (
+                <FlatList
+                  key="gridList"
+                  data={filteredMedia}
+                  renderItem={renderMediaItem}
+                  keyExtractor={item => item.id}
+                  numColumns={numColumns}
+                  contentContainerStyle={styles.mediaList}
+                  refreshControl={
+                    <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
+                  }
+                  onEndReached={() => {
+                    if (filteredMedia.length >= 20) {
+                      setShowLoadMorePhotos(true);
+                    }
+                  }}
+                  onEndReachedThreshold={0.8}
+                  ListFooterComponent={<View style={{ height: 90 }} />}
+                  onScroll={(e) => {
+                    setScrollPosition(e.nativeEvent.contentOffset.y);
+                  }}
+                  scrollEventThrottle={16}
+                />
+              )}
+            </>
+          )}
+          
+          {renderFilterModal()}
+          
+          {uploadingImages && (
+            <View style={{
+              ...StyleSheet.absoluteFillObject,
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 100,
+            }}>
+              <ActivityIndicator size="large" color="#FFFFFF" />
+              <Text style={{
+                color: '#FFFFFF',
+                fontSize: 16,
+                fontWeight: 'bold',
+                marginTop: 16,
+              }}>
+                Uploading Images ({Math.round(uploadProgress)}%)
               </Text>
             </View>
-            
-            <View style={styles.headerActionsContainer}>
-              {/* Filter button in header */}
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={() => setFilterModalVisible(true)}
-              >
-                <MaterialIcons name="filter-list" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              
-              {/* Refresh button */}
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={async () => {
-                  console.log('Manual refresh requested');
-                  await refreshCurrentUserDisplayName();
-                  fetchEventMedia();
-                }}
-              >
-                <MaterialIcons name="refresh" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              
-              {/* Download all button */}
-              {!selectionMode && filteredMedia.length > 0 && (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleDownloadAllPhotos}
-                  disabled={downloadingAll}
-                >
-                  {downloadingAll ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <MaterialIcons name="file-download" size={24} color="#FFFFFF" />
-                  )}
-                </TouchableOpacity>
-              )}
-              
-              {/* Only show select button for creators, not for regular participants */}
-              {!selectionMode && isCreator && (
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={toggleSelectionMode}
-                >
-                  <MaterialIcons name="select-all" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-              )}
-              
-              {/* Selection mode buttons - only shown when in selection mode */}
-              {selectionMode && (
-                <>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={toggleSelectionMode}
-                  >
-                    <MaterialIcons name="close" size={24} color="#FFFFFF" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.actionButton, 
-                      styles.deleteButton,
-                      selectedItems.length === 0 && styles.disabledButton
-                    ]}
-                    onPress={deleteSelectedItems}
-                    disabled={selectedItems.length === 0 || multiDeleteInProgress}
-                  >
-                    {multiDeleteInProgress ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <MaterialIcons name="delete" size={24} color="#FFFFFF" />
-                    )}
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        </View>
-        
-        {selectedMedia ? (
-          renderFullScreenImage()
-        ) : (
-          <>
-            {loading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={styles.loadingText}>Loading media...</Text>
-              </View>
-            ) : error ? (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{error}</Text>
-                <TouchableOpacity 
-                  style={styles.retryButton}
-                  onPress={fetchEventMedia}
-                >
-                  <Text style={styles.retryText}>Retry</Text>
-                </TouchableOpacity>
-              </View>
-            ) : filteredMedia.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <MaterialIcons name="photo-library" size={64} color="#CCCCCC" />
-                <Text style={styles.emptyText}>No photos or videos yet</Text>
-                <Text style={styles.emptySubtext}>Take some photos to see them here!</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={filteredMedia}
-                renderItem={renderMediaItem}
-                keyExtractor={(item) => item.id}
-                numColumns={numColumns}
-                contentContainerStyle={styles.mediaGrid}
-                refreshing={loading}
-                onRefresh={fetchEventMedia}
-                showsVerticalScrollIndicator={false}
-                initialNumToRender={12}
-                maxToRenderPerBatch={12}
-                windowSize={5}
-                removeClippedSubviews={true}
-                ListFooterComponent={<View style={{ height: 20 }} />}
-              />
-            )}
-          </>
-        )}
-        {downloadingAll && (
-          <LoadingOverlay isVisible={true} message="Downloading all photos..." />
-        )}
-        {multiDeleteInProgress && (
-          <LoadingOverlay isVisible={true} message="Deleting selected items..." />
-        )}
-        {renderFilterModal()}
+          )}
+        </SafeAreaView>
       </View>
-    </SafeAreaView>
+      
+      {/* Fullscreen view - positioned outside everything */}
+      {fullScreenVisible && renderFullScreenImage()}
+      
+      {/* Toast component moved outside so it's visible from fullscreen view */}
+      <Toast
+        visible={toastVisible}
+        message={toastMessage}
+        type={toastType}
+        duration={2000}
+        onClose={() => setToastVisible(false)}
+      />
+    </>
   );
 };
 
@@ -1741,7 +2294,9 @@ const styles = StyleSheet.create({
   mediaThumbnail: {
     width: '100%',
     height: '100%',
-  },
+    resizeMode: 'cover',
+    overflow: 'hidden'
+  } as ImageStyle,
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1875,7 +2430,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 12,
+    marginLeft: spacing.sm,
   },
   fullScreenContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -1888,31 +2443,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   fullScreenImage: {
-    width,
-    height,
-  },
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+    resizeMode: 'contain',
+    overflow: 'hidden'
+  } as ImageStyle,
   fullScreenOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
   },
   fullScreenHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: 16,
+    zIndex: 10,
   },
   closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    position: 'absolute',
+    top: 20,
+    left: 20,
+    zIndex: 100,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderRadius: 22,
+    padding: 8,
   },
   imageCounter: {
     color: '#fff',
@@ -1963,20 +2520,20 @@ const styles = StyleSheet.create({
   },
   navButton: {
     position: 'absolute',
-    top: '50%',
-    width: 50,
-    height: 50,
-    borderRadius: 25,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: -25,
+    borderRadius: 30,
+    padding: 8,
+    zIndex: 100,
   },
   prevButton: {
-    left: 16,
+    left: 20,
+    top: '50%',
+    transform: [{ translateY: -25 }],
   },
   nextButton: {
-    right: 16,
+    right: 20,
+    top: '50%',
+    transform: [{ translateY: -25 }],
   },
   deleteAction: {
     backgroundColor: 'rgba(255, 59, 48, 0.8)',
@@ -1991,11 +2548,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     borderRadius: 12,
     padding: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   likesCountText: {
     color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
+    marginLeft: 2,
   },
   creatorTag: {
     color: '#4CAF50',
@@ -2098,23 +2658,25 @@ const styles = StyleSheet.create({
   },
   headerActions: {
     flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'flex-end',
+    padding: spacing.sm,
+    borderBottomWidth: 1,
   },
   modernHeader: {
     backgroundColor: colors.primary,
-    paddingTop: 0,
+    paddingTop: 10,
+    paddingBottom: 10,
+    paddingHorizontal: 16,
+    elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.2,
     shadowRadius: 2,
-    elevation: 3,
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
+    justifyContent: 'space-between',
   },
   backButtonContainer: {
     width: 40,
@@ -2361,5 +2923,213 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  uploadButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  buttonIcon: {
+    marginRight: 8,
+  },
+  emptyButtons: {
+    flexDirection: 'column',
+    marginTop: 20,
+  },
+  uploadOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  uploadOverlayText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  
+  // New styles for our updated renderMediaItem function
+  mediaItemContainer: {
+    margin: spacing.xs / 2,
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
+  selectedItem: {
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  mediaImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#f0f0f0',
+  },
+  likeButton: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  likeCount: {
+    color: 'white',
+    fontSize: 10,
+    position: 'absolute',
+    bottom: -16,
+    right: 0,
+  },
+  selectionCheckmark: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mediaItemFooter: {
+    padding: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  mediaItemUsername: {
+    color: 'white',
+    fontSize: 12,
+    textAlign: 'center',
+    fontWeight: 'bold',
+  },
+  actionBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  horizontalMediaItem: {
+    width: 150,
+    height: 150,
+    margin: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  sectionHeader: {
+    padding: 8,
+    backgroundColor: colors.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  sectionHeaderText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.primary,
+    marginVertical: 8,
+    marginHorizontal: 8,
+  },
+  sectionSubText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+  },
+  simpleSectionHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    paddingHorizontal: 8, 
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  closeButtonTopLeft: {
+    position: 'absolute',
+    top: 20,
+    left: 20,
+    zIndex: 9999,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 22,
+    padding: 8,
+  },
+  navigationArrows: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    zIndex: 5,
+  },
+  navArrowLeft: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 30,
+    padding: 8,
+  },
+  navArrowRight: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 30,
+    padding: 8,
+  },
+  
+  // Add these styles for fullscreen mode
+  absoluteFullscreen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'black',
+    zIndex: 9999,
+    elevation: 9999,
+  },
+  centeredImageContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  trueFullscreenImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height * 0.8, // Using 80% of screen height
+    resizeMode: 'contain',
+  },
+  imageCounterContainer: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 15,
+    padding: 8,
+    zIndex: 100,
   },
 }); 
