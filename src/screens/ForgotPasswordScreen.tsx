@@ -33,6 +33,8 @@ export const ForgotPasswordScreen = () => {
   const [loading, setLoading] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   // Handle email passed from sign in screen
   useEffect(() => {
@@ -95,91 +97,106 @@ export const ForgotPasswordScreen = () => {
       const { error } = await supabase.auth.resetPasswordForEmail(email);
       
       if (error) {
-        showErrorAlert('Error', error.message);
+        if (error.message.includes('rate limit exceeded')) {
+          showErrorAlert(
+            'Rate Limit Exceeded',
+            'Too many attempts. Please wait a few minutes before trying again or check your email for the previous reset link.'
+          );
+        } else {
+          showErrorAlert('Error', error.message);
+        }
       } else {
+        setCodeSent(true);
         showSuccessAlert(
           'Check Your Email',
           'We\'ve sent a verification code to your email. Enter it below along with your new password.'
         );
-        setCodeSent(true);
       }
     } catch (err) {
       console.error('Password reset error:', err);
-      showErrorAlert('Error', 'An unexpected error occurred');
+      if (err instanceof Error) {
+        if (err.message.includes('rate limit exceeded')) {
+          showErrorAlert(
+            'Rate Limit Exceeded',
+            'Too many attempts. Please wait a few minutes before trying again or check your email for the previous reset link.'
+          );
+        } else if (err.message.includes('email rate succeeded')) {
+          setCodeSent(true);
+          showSuccessAlert(
+            'Check Your Email',
+            'We\'ve sent a verification code to your email. Enter it below along with your new password.'
+          );
+        } else {
+          showErrorAlert('Error', 'An unexpected error occurred');
+        }
+      }
     } finally {
       setLoading(false);
     }
   };
   
   const handleResetPassword = async () => {
-    // Validate all fields
-    if (!verificationCode || verificationCode.length < 6) {
-      showErrorAlert('Error', 'Please enter the 6-digit verification code from your email');
+    if (!email || !newPassword || !confirmPassword || !verificationCode) {
+      showErrorAlert('Error', 'Please fill in all fields');
       return;
     }
-    
-    if (!newPassword || newPassword.length < 8) {
-      showErrorAlert('Error', 'Password must be at least 8 characters long');
-      return;
-    }
-    
+
     if (newPassword !== confirmPassword) {
       showErrorAlert('Error', 'Passwords do not match');
       return;
     }
-    
+
+    // Password requirements check
+    if (newPassword.length < 6 || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      showErrorAlert('Error', 'Password must have at least 6 characters, one uppercase letter, and one number');
+      return;
+    }
+
     setLoading(true);
     
     try {
-      // First verify the OTP code
-      console.log('Verifying code and resetting password...');
-      
-      // Verify the OTP first - this will also sign the user in
+      // First verify the OTP
       const { error: verifyError } = await supabase.auth.verifyOtp({
         email,
         token: verificationCode,
         type: 'recovery'
       });
-      
+
       if (verifyError) {
-        console.error('Verification error:', verifyError);
         showErrorAlert('Error', 'Invalid or expired verification code. Please try again.');
-        setLoading(false);
         return;
       }
-      
-      // Now update the password
+
+      // After successful OTP verification, update the password
       const { error: updateError } = await supabase.auth.updateUser({
         password: newPassword
       });
       
-      // Sign out regardless of the result
-      await supabase.auth.signOut();
-      
       if (updateError) {
-        showErrorAlert('Error', updateError.message);
-      } else {
-        showSuccessAlert(
-          'Success',
-          'Your password has been reset successfully. Please sign in with your new password.',
-          () => {
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'SignIn' as never }],
-            });
-          }
-        );
+        // Only show error if it's not related to same password
+        const errorMessage = updateError.message.toLowerCase();
+        if (!errorMessage.includes('same password') && 
+            !errorMessage.includes('new password should be different')) {
+          showErrorAlert('Error', updateError.message);
+          return;
+        }
       }
-    } catch (err) {
-      console.error('Password reset error:', err);
-      showErrorAlert('Error', 'An unexpected error occurred');
-      
-      // Try to sign out if there was an error
-      try {
-        await supabase.auth.signOut();
-      } catch (e) {
-        console.error('Error signing out:', e);
-      }
+
+      // Sign out and redirect
+      await supabase.auth.signOut();
+      showSuccessAlert(
+        'Success',
+        'Your password has been updated successfully. Please sign in with your password.',
+        () => {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'SignIn' as never }],
+          });
+        }
+      );
+    } catch (error) {
+      console.error('Unexpected error during password reset:', error);
+      showErrorAlert('Error', 'An unexpected error occurred while resetting your password.');
     } finally {
       setLoading(false);
     }
@@ -263,24 +280,67 @@ export const ForgotPasswordScreen = () => {
                 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>New Password</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter new password"
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                    secureTextEntry
-                  />
+                  <View style={styles.passwordInputContainer}>
+                    <TextInput
+                      style={[styles.input, { flex: 1 }]}
+                      placeholder="Enter new password"
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      secureTextEntry={!showNewPassword}
+                    />
+                    <TouchableOpacity
+                      style={styles.eyeIcon}
+                      onPress={() => setShowNewPassword(!showNewPassword)}
+                    >
+                      <MaterialIcons
+                        name={showNewPassword ? "visibility-off" : "visibility"}
+                        size={24}
+                        color={colors.text.secondary}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.passwordCriteria}>
+                    <Text style={styles.criteriaText}>Password must have:</Text>
+                    <Text style={[
+                      styles.criteriaItem,
+                      newPassword.length >= 6 && styles.criteriaMet
+                    ]}>• At least 6 characters</Text>
+                    <Text style={[
+                      styles.criteriaItem,
+                      /[A-Z]/.test(newPassword) && styles.criteriaMet
+                    ]}>• One uppercase letter</Text>
+                    <Text style={[
+                      styles.criteriaItem,
+                      /[0-9]/.test(newPassword) && styles.criteriaMet
+                    ]}>• One number</Text>
+                    <Text style={[
+                      styles.criteriaItem,
+                      newPassword === confirmPassword && confirmPassword !== '' && styles.criteriaMet
+                    ]}>• Passwords match</Text>
+                  </View>
                 </View>
                 
                 <View style={styles.inputContainer}>
                   <Text style={styles.label}>Confirm Password</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Confirm new password"
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    secureTextEntry
-                  />
+                  <View style={styles.passwordInputContainer}>
+                    <TextInput
+                      style={[styles.input, { flex: 1 }]}
+                      placeholder="Confirm new password"
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      secureTextEntry={!showConfirmPassword}
+                    />
+                    <TouchableOpacity
+                      style={styles.eyeIcon}
+                      onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      <MaterialIcons
+                        name={showConfirmPassword ? "visibility-off" : "visibility"}
+                        size={24}
+                        color={colors.text.secondary}
+                      />
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 
                 <TouchableOpacity
@@ -393,5 +453,36 @@ const styles = StyleSheet.create({
   textButtonText: {
     color: colors.primary,
     fontSize: typography.sizes.md,
+  },
+  passwordInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+  },
+  eyeIcon: {
+    padding: spacing.sm,
+    marginRight: spacing.sm,
+  },
+  passwordCriteria: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: colors.background,
+    borderRadius: 8,
+  },
+  criteriaText: {
+    fontSize: typography.sizes.sm,
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
+  },
+  criteriaItem: {
+    fontSize: typography.sizes.sm,
+    color: colors.text.secondary,
+    marginLeft: spacing.sm,
+  },
+  criteriaMet: {
+    color: colors.success,
   },
 }); 

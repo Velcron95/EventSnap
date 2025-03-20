@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useCameraPermissions } from 'expo-camera';
 import * as MediaLibrary from 'expo-media-library';
+import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Button } from '../components/Button';
 
@@ -19,29 +20,38 @@ interface Props {
 export const PermissionsScreen: React.FC<Props> = ({ onPermissionsGranted }) => {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
+  const [photoPermission, requestPhotoPermission] = ImagePicker.useMediaLibraryPermissions();
 
   // Use useEffect to call onPermissionsGranted when permissions are granted
   useEffect(() => {
-    if (cameraPermission?.granted && mediaPermission?.granted) {
+    if (cameraPermission?.granted && mediaPermission?.granted && photoPermission?.granted) {
       onPermissionsGranted();
     }
-  }, [cameraPermission, mediaPermission, onPermissionsGranted]);
+  }, [cameraPermission, mediaPermission, photoPermission, onPermissionsGranted]);
 
   const handleRequestPermission = async () => {
     try {
       console.log('Requesting permissions...');
+      
+      // Request camera permission
       const cameraResult = await requestCameraPermission();
+      
+      // Request media permission
       const mediaResult = await requestMediaPermission();
-      console.log('Permission results:', { cameraResult, mediaResult });
+      
+      // Request photo permission
+      const photoResult = await requestPhotoPermission();
+      
+      console.log('Permission results:', { cameraResult, mediaResult, photoResult });
 
-      if (cameraResult.granted && mediaResult?.granted) {
+      if (cameraResult.granted && mediaResult?.granted && photoResult?.granted) {
         console.log('All permissions granted');
         // onPermissionsGranted will be called by the useEffect
       } else {
         console.log('Some permissions were denied');
         Alert.alert(
           'Permissions Required',
-          'Camera and media access are required to use EventSnap. Please enable them in your device settings.',
+          'Camera, photo library, and media access are required to use EventSnap. Please enable them in your device settings.',
           [
             { text: 'Cancel', style: 'cancel' },
             { 
@@ -64,7 +74,7 @@ export const PermissionsScreen: React.FC<Props> = ({ onPermissionsGranted }) => 
   };
 
   // Show loading state while permissions are being checked
-  if (!cameraPermission || !mediaPermission) {
+  if (!cameraPermission || !mediaPermission || !photoPermission) {
     return (
       <View style={styles.container}>
         <Text style={styles.description}>Checking permissions...</Text>
@@ -72,14 +82,14 @@ export const PermissionsScreen: React.FC<Props> = ({ onPermissionsGranted }) => 
     );
   }
 
-  // If either permission is not granted, show the permission request screen
-  if (!cameraPermission.granted || !mediaPermission.granted) {
+  // If any permission is not granted, show the permission request screen
+  if (!cameraPermission.granted || !mediaPermission.granted || !photoPermission.granted) {
     return (
       <View style={styles.container}>
         <MaterialIcons name="camera-alt" size={64} color="#007AFF" style={styles.icon} />
-        <Text style={styles.title}>Camera Access Required</Text>
+        <Text style={styles.title}>Permissions Required</Text>
         <Text style={styles.description}>
-          EventSnap needs access to your camera and photo library to take and save photos for event sharing.
+          EventSnap needs access to your camera, photo library, and media to take and save photos for event sharing.
           Without these permissions, you won't be able to use the app.
         </Text>
         <Button
