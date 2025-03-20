@@ -10,18 +10,22 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^14.0.4",
-    "@react-native-async-storage/async-storage": "^1.23.1",
+    "@react-native-async-storage/async-storage": "^1.24.0",
     "@react-navigation/bottom-tabs": "^6.5.12",
     "@react-navigation/native": "^6.1.10",
     "@react-navigation/native-stack": "^6.11.0",
     "@supabase/auth-helpers-react": "^0.5.0",
     "@supabase/supabase-js": "^2.39.3",
+    "@types/base-64": "^1.0.2",
+    "base-64": "^1.0.0",
     "expo": "^52.0.39",
     "expo-camera": "~16.0.18",
     "expo-file-system": "~18.0.11",
+    "expo-image-manipulator": "~13.0.6",
     "expo-image-picker": "^16.0.6",
     "expo-media-library": "~17.0.6",
     "expo-sharing": "^13.0.1",
+    "expo-splash-screen": "^0.29.22",
     "expo-status-bar": "~2.0.1",
     "react": "^18.3.1",
     "react-native": "^0.76.7",
@@ -29,8 +33,7 @@
     "react-native-paper": "^5.13.1",
     "react-native-safe-area-context": "^4.12.0",
     "react-native-screens": "~4.4.0",
-    "react-native-url-polyfill": "^2.0.0",
-    "expo-image-manipulator": "~13.0.6"
+    "react-native-url-polyfill": "^2.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

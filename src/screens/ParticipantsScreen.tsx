@@ -927,6 +927,8 @@ export const ParticipantsScreen = React.memo(() => {
 
   return (
     <View style={styles.container}>
+      <HeaderBar />
+      
       {/* Event banner with back button */}
       {eventName && (
         <View style={styles.eventBanner}>

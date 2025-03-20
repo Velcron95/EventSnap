@@ -15,6 +15,7 @@ import { Linking } from 'react-native';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { CustomAlert } from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
+import { colors } from '../styles/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SignUp'>;
 
@@ -29,6 +30,54 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
   const { signUp } = useAuth();
   const { alertProps, showAlert } = useCustomAlert();
 
+  // Add state for password visibility
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
+
+  // Add state for password validation
+  const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
+  const [passwordsMatch, setPasswordsMatch] = useState(true);
+
+  // Function to validate password
+  const validatePassword = (value: string) => {
+    const errors: string[] = [];
+    
+    if (value.length < 8) {
+      errors.push('Password must be at least 8 characters long');
+    }
+    if (!/\d/.test(value)) {
+      errors.push('Password must contain at least one number');
+    }
+    if (!/[A-Z]/.test(value)) {
+      errors.push('Password must contain at least one uppercase letter');
+    }
+
+    setPasswordErrors(errors);
+    return errors.length === 0;
+  };
+
+  // Function to check if passwords match
+  const checkPasswordsMatch = (password: string, confirmPassword: string) => {
+    const match = password === confirmPassword;
+    setPasswordsMatch(match);
+    return match;
+  };
+
+  // Update password validation when password changes
+  const handlePasswordChange = (value: string) => {
+    setPassword(value);
+    validatePassword(value);
+    if (confirmPassword) {
+      checkPasswordsMatch(value, confirmPassword);
+    }
+  };
+
+  // Update password match validation when confirm password changes
+  const handleConfirmPasswordChange = (value: string) => {
+    setConfirmPassword(value);
+    checkPasswordsMatch(password, value);
+  };
+
   const handleSignUp = async () => {
     if (!email || !password || !confirmPassword || !displayName) {
       showAlert({
@@ -39,11 +88,31 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
       return;
     }
 
-    if (password !== confirmPassword) {
+    if (passwordErrors.length > 0) {
+      showAlert({
+        type: 'error',
+        title: 'Invalid Password',
+        message: passwordErrors.join('\n')
+      });
+      return;
+    }
+
+    if (!passwordsMatch) {
       showAlert({
         type: 'error',
         title: 'Error',
         message: 'Passwords do not match'
+      });
+      return;
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      showAlert({
+        type: 'error',
+        title: 'Invalid Email',
+        message: 'Please enter a valid email address'
       });
       return;
     }
@@ -172,21 +241,55 @@ export const SignUpScreen: React.FC<Props> = ({ navigation }) => {
           onChangeText={setDisplayName}
         />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={[styles.input, styles.passwordInput]}
+            placeholder="Password"
+            value={password}
+            onChangeText={handlePasswordChange}
+            secureTextEntry={!passwordVisible}
+          />
+          <TouchableOpacity 
+            style={styles.visibilityToggle}
+            onPress={() => setPasswordVisible(!passwordVisible)}
+          >
+            <MaterialIcons 
+              name={passwordVisible ? "visibility" : "visibility-off"} 
+              size={24} 
+              color="#666"
+            />
+          </TouchableOpacity>
+        </View>
+        {passwordErrors.length > 0 && (
+          <View style={styles.errorContainer}>
+            {passwordErrors.map((error, index) => (
+              <Text key={index} style={styles.errorText}>{error}</Text>
+            ))}
+          </View>
+        )}
 
-        <TextInput
-          style={styles.input}
-          placeholder="Confirm Password"
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          secureTextEntry
-        />
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={[styles.input, styles.passwordInput]}
+            placeholder="Confirm Password"
+            value={confirmPassword}
+            onChangeText={handleConfirmPasswordChange}
+            secureTextEntry={!confirmPasswordVisible}
+          />
+          <TouchableOpacity 
+            style={styles.visibilityToggle}
+            onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}
+          >
+            <MaterialIcons 
+              name={confirmPasswordVisible ? "visibility" : "visibility-off"} 
+              size={24} 
+              color="#666"
+            />
+          </TouchableOpacity>
+        </View>
+        {!passwordsMatch && confirmPassword.length > 0 && (
+          <Text style={styles.errorText}>Passwords do not match</Text>
+        )}
 
         <View style={styles.checkboxContainer}>
           <TouchableOpacity 
@@ -291,6 +394,30 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     paddingHorizontal: 15,
     fontSize: 16,
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    marginBottom: 5,
+  },
+  passwordInput: {
+    flex: 1,
+    borderWidth: 0,
+    marginBottom: 0,
+  },
+  visibilityToggle: {
+    padding: 10,
+  },
+  errorContainer: {
+    marginBottom: 15,
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    marginBottom: 5,
   },
   checkboxContainer: {
     marginBottom: 15,

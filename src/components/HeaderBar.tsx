@@ -19,12 +19,16 @@ interface HeaderBarProps {
   title?: string;
   rightComponent?: React.ReactNode;
   forceTitle?: string;
+  hasBackButton?: boolean;
+  onBack?: () => void;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({ 
   title,
   rightComponent,
-  forceTitle
+  forceTitle,
+  hasBackButton,
+  onBack
 }) => {
   const navigation = useNavigation();
   const route = useRoute();
@@ -65,6 +69,14 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     // @ts-ignore - Navigation typing is complex
     navigation.navigate('ProfileSettings');
   };
+
+  const handleBackPress = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      navigation.goBack();
+    }
+  };
   
   return (
     <View style={styles.container}>
@@ -75,12 +87,26 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           {title ? (
             <>
               <TouchableOpacity 
-                onPress={() => navigation.goBack()}
+                onPress={handleBackPress}
                 style={styles.backButton}
               >
                 <MaterialIcons name="arrow-back" size={30} color="#FFFFFF" />
               </TouchableOpacity>
               <Text style={styles.title} numberOfLines={1}>{title}</Text>
+            </>
+          ) : hasBackButton ? (
+            <>
+              <TouchableOpacity 
+                onPress={handleBackPress}
+                style={styles.backButton}
+              >
+                <MaterialIcons name="arrow-back" size={30} color="#FFFFFF" />
+              </TouchableOpacity>
+              <Text style={styles.appName} numberOfLines={1}>
+                {isEventsScreen 
+                  ? 'EventSnap' 
+                  : (forceTitle || currentEvent?.name || 'EventSnap')}
+              </Text>
             </>
           ) : (
             <>

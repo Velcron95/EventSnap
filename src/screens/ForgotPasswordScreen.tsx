@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Animated,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -32,7 +31,6 @@ export const ForgotPasswordScreen = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
   
   // Handle email passed from sign in screen
   useEffect(() => {
@@ -65,23 +63,6 @@ export const ForgotPasswordScreen = () => {
     
     signOut();
   }, [route.params?.comingFromProfile]);
-  
-  // Use layout effect to manage CodeSent changes with animation
-  useLayoutEffect(() => {
-    // Fade out
-    Animated.timing(fadeAnim, {
-      toValue: 0,
-      duration: 100,
-      useNativeDriver: true
-    }).start(() => {
-      // Fade in after state change is complete
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true
-      }).start();
-    });
-  }, [codeSent, fadeAnim]);
   
   const handleRequestReset = async () => {
     if (!email || !email.includes('@')) {
@@ -197,10 +178,14 @@ export const ForgotPasswordScreen = () => {
   return (
     <KeyboardAvoidingView 
       style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={100}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <TouchableOpacity 
           style={styles.backButton}
           onPress={handleBack}
@@ -211,7 +196,7 @@ export const ForgotPasswordScreen = () => {
         <View style={styles.content}>
           <Text style={styles.title}>Reset Your Password</Text>
           
-          <Animated.View style={[styles.formContainer, { opacity: fadeAnim }]}>
+          <View style={styles.formContainer}>
             {!codeSent ? (
               <>
                 <Text style={styles.subtitle}>
@@ -303,7 +288,7 @@ export const ForgotPasswordScreen = () => {
                 </TouchableOpacity>
               </>
             )}
-          </Animated.View>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -339,7 +324,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   formContainer: {
-    minHeight: 450, // Ensure consistent minimum height
+    flex: 1,
     justifyContent: 'flex-start',
   },
   subtitle: {
@@ -366,7 +351,7 @@ const styles = StyleSheet.create({
   },
   codeInput: {
     textAlign: 'center',
-    letterSpacing: 10,
+    letterSpacing: 8,
     fontSize: typography.sizes.lg,
     fontWeight: 'bold',
   },

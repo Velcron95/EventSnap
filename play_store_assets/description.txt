@@ -1,0 +1,39 @@
+# EventSnap - Event Photo Sharing Made Easy
+
+## Short Description (80 characters)
+Capture, share & collect event photos instantly with friends and family.
+
+## Full Description (4000 characters max)
+EventSnap is the ultimate photo-sharing solution for all your events - from casual gatherings to life's biggest celebrations. Never miss a moment again!
+
+### Key Features:
+
+✅ **Easy Event Creation**: Set up an event in seconds with a custom name and join code.
+
+✅ **Secure Photo Sharing**: Only invited participants can view and upload photos to your events.
+
+✅ **Real-time Photo Gallery**: See photos appear instantly as they're uploaded by event participants.
+
+✅ **Direct Camera Access**: Take photos within the app and share them with one tap.
+
+✅ **Photo Library Integration**: Choose existing photos from your device to share with the group.
+
+✅ **User-friendly Interface**: Simple, intuitive design that anyone can use.
+
+✅ **Participant Management**: See who's joined your event and manage the guest list.
+
+✅ **Free to Use**: All core features are available without any subscription fees.
+
+EventSnap is perfect for:
+• Weddings and engagement parties
+• Family gatherings and reunions
+• Birthday celebrations
+• Sporting events
+• School activities
+• Corporate events
+• Vacations and group trips
+• Music festivals and concerts
+
+Stop juggling multiple platforms and messaging apps to collect event photos. EventSnap brings everyone's memories together in one place, ensuring that no special moment gets lost.
+
+Download EventSnap today and start capturing life's moments together! 

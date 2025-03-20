@@ -27,6 +27,7 @@ import { CameraType, FlashMode, CameraCapturedPicture } from 'expo-camera';
 import { CameraComponent } from '../components/CameraComponent';
 import { v4 as uuidv4 } from 'uuid';
 import { showErrorAlert, showSuccessAlert } from '../utils/alert';
+import { HeaderBar } from '../components/HeaderBar';
 
 // Define the route params type
 type CameraScreenRouteParams = {
@@ -303,6 +304,7 @@ export const CameraScreen = () => {
   // Main camera view
   return (
     <View style={styles.container}>
+      <HeaderBar />
       <CameraView
         ref={cameraRef}
         style={styles.camera}
